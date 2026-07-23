@@ -108,7 +108,7 @@ feat(api)!: remove the deprecated v1 endpoint
 
 带 `!` 的描述或包含 `BREAKING CHANGE:` footer 的提交归入 `Breaking Changes`, 并说明迁移方式. 不要把 breaking change 仅留在普通 `Features` 或 `Fixes` 分类中.
 
-不要只依赖 GitHub generated release notes 或 PR label 自动分类. 生成正文前执行以下归一化流程:
+不要只依赖 GitHub generated release notes 或 PR label 自动分类, 也不要编写自动化生成脚本, 你需要在每次 tag 的时候手动生成 annotated tag 的正文. 生成正文前执行以下归一化流程:
 
 1. 确定上一个 release tag, 收集该 tag 到当前 tag 之间的 merged PR 和直接提交.
 2. 对符合 Conventional Commits 的标题直接保留类型, scope 和 breaking change 标记.
