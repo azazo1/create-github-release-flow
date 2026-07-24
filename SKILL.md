@@ -1,57 +1,92 @@
 ---
 name: create-github-release-flow
-description: 创建或修改由 tag 触发的 GitHub Actions 跨平台自动发布流程, 为 Windows, Linux 和 macOS 构建 x86_64/aarch64 产物, 创建 GitHub Release, 并将 feat, fix, perf 等 Conventional Commits 和非规范提交文本整理成规范的 release notes.
+description: 创建或修改与常规 CI 共用构建矩阵的 GitHub Actions tag 发布流程, 同时支持 push 和 workflow_dispatch 手动触发. 适用于需要校验 tag 与项目版本, 复用既有构建入口, 在 Windows, Linux 和 macOS 原生 runner 上构建 x86_64/aarch64 产物, 按平台校验并打包 tar.gz, zip 或 dmg, 汇总校验和, 组合版本化人工 release notes 或 annotated tag 正文与 GitHub generated notes, 以及幂等创建或更新 GitHub Release 的仓库.
 ---
 
 # 创建 GitHub Release 流
 
 ## 目标
 
-先确认项目现有的构建和版本规则, 再实现以下流程:
+先确认项目现有的 CI, 构建, 打包和版本规则, 再实现以下流程:
 
 ```text
-tag -> validate -> build matrix -> package -> release
+branch/PR -> build matrix
+tag -> validate version -> build matrix -> validate/package -> notes/checksums -> create/update release
+manual branch -> build matrix
+manual tag -> validate version -> build matrix -> validate/package -> notes/checksums -> create/update release
 ```
 
-默认使用 tag push 触发. 构建或校验失败时不得创建公开 release.
+默认让普通 CI, tag 发布和手动触发复用同一套构建矩阵. 普通 branch, PR 和未指定 tag 的手动触发只构建. Tag push 或显式指定已有 tag 的手动触发额外执行版本校验, 产物校验, 打包, 上传和发布. 如果仓库已有独立发布 workflow, 可以保留分离结构, 但不要复制构建逻辑.
+
+构建, 校验或产物完整性检查失败时不得创建公开 release.
 
 ## 工作流程
 
 ### 1. 确认项目规则
 
-阅读项目说明, 现有 CI 和构建入口, 确认:
+阅读项目说明, 现有 CI, task runner 和打包脚本, 确认:
 
 - tag 格式和版本来源.
 - 正式构建命令与 lockfile.
-- 产物目录和文件名.
-- 各平台的编译 target 和运行时兼容要求.
+- branch, PR 和 tag 当前执行的 job.
+- 二进制, 应用包和归档的输出路径.
+- 各平台的编译 target, runner 和运行时兼容要求.
+- release notes, changelog 和历史 release 的维护方式.
 
-优先调用项目已有的 task runner 或发布脚本, 不要在 workflow 中复制其内部逻辑.
+优先调用项目已有的 task runner 或打包脚本. 平台专用打包包含应用目录, 图标, metadata 或签名准备时, 将逻辑放在项目脚本中, 不要把完整实现内联到 workflow.
 
-### 2. 校验 tag
+实现具体 YAML 片段时按需读取 [workflow-patterns.md](references/workflow-patterns.md), 不要一次性复制所有示例.
 
-根据项目惯例匹配 `v1.2.3` 或 `1.2.3` 等 tag. Tag pattern 只负责减少无效运行, workflow 内仍要校验版本格式.
+### 2. 组织 CI, tag 与手动触发
 
-如果项目文件中保存版本号, 使用结构化 metadata 命令读取, 规范化 tag 后严格比较. 如果 tag 是唯一版本来源, 不要额外维护第二份版本状态.
+根据项目惯例匹配 `v1.2.3` 或 `1.2.3` 等 tag. Tag pattern 只负责减少无效运行, workflow 内仍要严格校验版本.
 
-为每个 tag 设置独立的 concurrency group, 并使用 `cancel-in-progress: false`.
+如果项目文件中保存版本号, 使用结构化 metadata 命令读取, 规范化 tag 后严格比较. Rust 项目优先使用 `cargo metadata --locked --no-deps --format-version 1`, 不要用文本正则读取 `Cargo.toml`. 如果 tag 是唯一版本来源, 不要额外维护第二份版本状态.
 
-### 3. 构建并发布
+添加 `workflow_dispatch` 和可选字符串 input `tag`. 空值表示只对用户在 GitHub UI 或 API 中选择的 ref 运行构建. 非空值表示发布该已有 tag. 不要让手动发布隐式使用触发 workflow 的 branch commit.
+
+在 `version` job 的第一个步骤统一解析并输出:
+
+- `is_release`: tag push 或手动提供 tag 时为 `true`.
+- `tag_name`: tag push 的 ref name 或手动输入的 tag.
+- `source_ref`: tag 发布时为 `refs/tags/TAG`, 其他情况为当前事件的 `github.sha`.
+- `version`: 仅在 `is_release` 为 `true` 且版本校验成功后输出.
+
+手动 tag 先用 `git check-ref-format "refs/tags/$TAG_NAME"` 校验格式, 再检出完整 tag. Tag 不存在时必须在构建开始前失败.
+
+当普通 CI 和发布共用 workflow 时:
+
+- `version` job 保持可被构建 job 依赖, 但版本校验步骤只在 `is_release` 为 `true` 时执行.
+- 构建 job 使用 `source_ref` 检出代码, 确保手动发布构建的是目标 tag.
+- 构建矩阵在 branch, PR, tag 和手动触发上执行.
+- 二进制发布校验, 打包和 artifact 上传步骤只在 `is_release` 为 `true` 时执行.
+- release job 只在 `is_release` 为 `true` 时执行, 并依赖版本校验和全部矩阵构建.
+
+为每个 ref 或手动输入 tag 设置 concurrency group, 并使用 `cancel-in-progress: false`, 防止同一 tag 的 push 和手动发布并发修改 release.
+
+### 3. 构建, 校验并打包
 
 默认覆盖以下构建矩阵:
 
-| Platform | Architecture | Archive |
+| 平台 | 架构 | 常见归档 |
 | --- | --- | --- |
 | Linux | `x86_64` | `.tar.gz` |
 | Linux | `aarch64` | `.tar.gz` |
-| macOS | `x86_64` | `.tar.gz` |
-| macOS | `aarch64` | `.tar.gz` |
 | Windows | `x86_64` | `.zip` |
 | Windows | `aarch64` | `.zip` |
+| macOS | `x86_64` | CLI 使用 `.tar.gz`, 桌面应用使用 `.dmg` |
+| macOS | `aarch64` | CLI 使用 `.tar.gz`, 桌面应用使用 `.dmg` |
 
 在实现时查阅 GitHub 官方 runner 文档, 确认当前可用的 runner 标签和仓库资格. 优先使用对应系统和架构的原生 runner. 无法原生构建时使用项目成熟的交叉编译工具链, 并明确 linker, sysroot 和系统库要求.
 
-每个平台使用正式构建命令, 在归档前运行 `--version` 或等价的最小 smoke test. 无法直接运行交叉编译产物时, 使用模拟器或项目提供的加载检查.
+每个平台使用正式构建命令和 lockfile. 在归档前选择适合产物类型的最小校验:
+
+- 可安全启动的 CLI 运行 `--version` 或等价 smoke test.
+- 不适合在 CI 中启动的 GUI 或服务程序, 检查目标文件存在, 可执行权限和 ELF, PE 或 Mach-O 文件格式.
+- 应用包或安装镜像检查目录结构, 主程序和必要资源.
+- 无法直接运行的交叉编译产物使用模拟器, 加载检查或文件格式检查.
+
+不要为了形式统一而强行执行会启动 GUI, 后台服务或交互流程的二进制.
 
 产物名使用统一格式:
 
@@ -59,119 +94,83 @@ tag -> validate -> build matrix -> package -> release
 PROJECT-VERSION-PLATFORM-ARCH.EXT
 ```
 
-例如 `project-1.2.3-linux-x86_64.tar.gz` 和 `project-1.2.3-windows-x86_64.zip`.
+例如 `project-1.2.3-linux-x86_64.tar.gz`, `project-1.2.3-windows-aarch64.zip` 和 `project-1.2.3-macos-aarch64.dmg`.
 
-构建 job 上传归档, release job 下载全部归档并生成统一的 `SHA256SUMS`. 所有构建成功后, 使用 runner 自带的 `gh` CLI 创建 release 并上传产物.
+构建 job 为每个矩阵项上传一个独立 artifact, 缺少文件时直接失败. 发布专用 artifact 可以设置较短 retention. Release job 下载并合并全部 artifact, 只对预期扩展名生成统一的 `SHA256SUMS`.
 
-创建 release 时:
+在生成校验和前显式统计归档数量. 在上传 release 前再次统计归档和 `SHA256SUMS` 的总数量. 数量必须与矩阵一致, 防止 glob 静默漏传或混入旧文件.
+
+### 4. 维护 release notes
+
+每个版本维护一个人工编写的 release notes 文件, 默认路径为:
+
+```text
+docs/release-notes/VERSION.md
+```
+
+人工说明是 release 正文的主体, 需要覆盖用户可见变化, 兼容性影响和升级操作. 文件缺失或为空时发布直接失败. 默认结构为:
+
+- 标题 `PROJECT vVERSION`.
+- 一段版本摘要.
+- 仅在有实际内容时添加 `Highlights` 和 `Upgrade Notes`.
+- 按产品领域组织主要变化, 不强制套用空的固定分类.
+
+生成内容前检查上一个 release tag 到当前 tag 之间的 merged PR, 直接提交和实际 diff. Conventional Commits 中的 `feat`, `fix`, `perf`, `docs`, `build`, `ci`, `refactor`, `test`, `chore` 和 `revert` 可用于判断影响类型. 对非规范标题结合 PR metadata 和 diff 判断, 不要只根据措辞猜测.
+
+不要编写自定义自动化脚本生成这份人工说明. 人工整理时合并同一 PR 的 merge 与 squash 痕迹, 避免把完整提交列表再抄入正文. Breaking change 必须说明迁移方式, 不能只作为普通功能条目出现.
+
+在 workflow 中调用 GitHub Releases API 的 `generate-notes` 接口生成补充内容, 并将其追加到人工说明之后. Generated notes 用于补充贡献者, PR 列表和完整 diff 链接, 不替代人工说明. `target_commitish` 使用 release job 检出目标 tag 后的 `git rev-parse HEAD`, 不要在手动发布时直接使用触发分支的 `github.sha`.
+
+默认让 GitHub 根据当前 tag 自动选择上一个 tag. 如果 release 序列有断点, 补发版本或基线不能自动推导, 可维护以下可选文件:
+
+```text
+docs/release-notes/VERSION-base.txt
+```
+
+读取后先用 `git check-ref-format` 校验, 再作为 `previous_tag_name` 传给 API. 不要在 workflow 中硬编码一次性的历史 tag.
+
+如果仓库已有人工 changelog 或 annotated tag 正文作为唯一发布来源, 沿用现有约定, 但仍要保证正文可通过文件传递, 且不会与 generated notes 重复.
+
+使用 annotated tag 正文时, 不要认为 `actions/checkout` 的 `fetch-depth: 0` 一定会保留本地 tag object. Checkout 可能让本地 `refs/tags/TAG` 指向 peeled commit, 导致 annotated tag 被误判为 lightweight tag. Checkout 后必须使用解析得到的 `tag_name` 精确 refetch 远端 tag ref, 再检查 `git cat-file -t` 返回 `tag`, 提取正文并验证正文非空. 手动触发时不得使用指向触发分支的 `github.ref_name`. 具体步骤见 [workflow-patterns.md](references/workflow-patterns.md#annotated-tag-正文).
+
+### 5. 创建或更新 release
+
+所有矩阵构建成功后, 使用 runner 自带的 `gh` CLI 发布. 只给 release job 设置 `contents: write`.
+
+创建或更新 release 时:
 
 - 使用 `--verify-tag` 确认 tag 已存在.
-- 只给 release job 设置 `contents: write`.
-- 找不到预期产物时直接失败.
+- 标题统一为 `PROJECT vVERSION`, 先移除版本中的可选 `v` 前缀.
 - SemVer 包含预发布后缀时设置 prerelease.
+- 找不到预期产物或校验和时直接失败.
+- release 不存在时使用 `gh release create`.
+- release 已存在时使用 `gh release edit` 更新标题和正文, 再用 `gh release upload --clobber` 覆盖产物.
 - 需要提前创建 release 时先设为 draft, 产物完整后再公开.
 
-### 4. 规范 release notes
+支持更新已有 release, 使失败后的重跑可以收敛到完整状态, 而不是因为 release 已存在再次失败.
 
-Release 标题统一为:
-
-```text
-PROJECT vVERSION
-```
-
-先移除版本中的可选 `v` 前缀, 避免生成 `vv1.2.3`.
-
-变更描述遵循 Conventional Commits 格式:
-
-```text
-<type>[optional scope][!]: <description>
-```
-
-例如:
-
-```text
-feat(cli): add JSON output
-fix(build): package the Windows ARM64 binary
-perf(parser): reduce allocation during startup
-feat(api)!: remove the deprecated v1 endpoint
-```
-
-使用以下类型组织 release notes:
-
-- `feat` -> `Features`
-- `fix` -> `Fixes`
-- `perf` -> `Performance`
-- `docs` -> `Documentation`
-- `build(deps)` 或 `chore(deps)` -> `Dependencies`
-- `refactor`, `test`, `build`, `ci`, `chore` -> `Maintenance`
-- `revert` -> `Reverts`
-
-带 `!` 的描述或包含 `BREAKING CHANGE:` footer 的提交归入 `Breaking Changes`, 并说明迁移方式. 不要把 breaking change 仅留在普通 `Features` 或 `Fixes` 分类中.
-
-不要只依赖 GitHub generated release notes 或 PR label 自动分类, 也不要编写自动化生成脚本, 你需要在每次 tag 的时候手动生成 annotated tag 的正文. 生成正文前执行以下归一化流程:
-
-1. 确定上一个 release tag, 收集该 tag 到当前 tag 之间的 merged PR 和直接提交.
-2. 对符合 Conventional Commits 的标题直接保留类型, scope 和 breaking change 标记.
-3. 对不符合规范的文本, 依次参考关联 PR 的标题, label, 正文和实际 diff 推断类型与 scope.
-4. 将推断结果改写成 `<type>(<scope>): <description>` 形式的 release 条目. 只改写 release notes, 不改写 Git 历史.
-5. 合并同一 PR 的 merge commit 与 squash commit, 避免重复条目. 保留 PR 编号和贡献者信息.
-6. 将无法可靠识别但确属内部维护的条目归为 `chore`. 不要把未知变更猜成 `feat` 或 `fix`.
-
-推断类型时按实际影响判断:
-
-- 新增用户能力归为 `feat`.
-- 修正错误行为归为 `fix`.
-- 只改善性能归为 `perf`.
-- 只修改文档或测试归为 `docs` 或 `test`.
-- 依赖, 构建和 CI 变更归为 `build(deps)`, `chore(deps)`, `build` 或 `ci`.
-- 不改变外部行为的代码整理归为 `refactor`.
-
-优先使用 GitHub API 或 `gh` 的结构化输出关联 PR 和提交. 不要仅用正则解析 merge commit 文本. 如果仓库使用 squash merge, 要求 PR 标题符合 Conventional Commits, 使后续发布无需再次推断.
-
-将归一化结果写入 `release-notes.md`, 再通过 `gh release create --notes-file` 发布. Generated release notes 可以补充贡献者和完整 diff 链接, 但不得与归一化条目重复.
-
-维护 `.github/release.yml`, 让 PR label 与上述 Conventional Commits 类型对应, 作为分类提示和校验依据.
-
-使用稳定且面向用户的分类:
-
-- `Breaking Changes`
-- `Features`
-- `Fixes`
-- `Performance`
-- `Documentation`
-- `Dependencies`
-- `Maintenance`
-- `Reverts`
-
-只保留实际存在的分类. 不要生成空章节, 不要重复 PR 列表, 不要使用 `Bug fixes and improvements` 等缺少信息的套话.
-
-如果项目维护人工 changelog, 优先使用对应版本的 changelog. Annotated tag 描述只能作为简短导语, 不要与 changelog 或 generated notes 重复.
-
-仅在确有内容时增加:
-
-- `Highlights`: 最重要的用户可见变化.
-- `Breaking Changes`: 不兼容变化和迁移方式.
-- `Upgrade Notes`: 用户必须执行的升级操作.
-
-Release notes 应保留 `feat`, `fix` 等类型前缀, 并说明用户获得了什么变化. 内部 CI, 重构或维护细节仅在影响安装, 兼容性或安全性时出现.
-
-### 5. 验证
+### 6. 验证
 
 1. 使用 YAML parser 和项目已有的 action linter 检查 workflow.
-2. 模拟合法与非法 tag, 确认版本校验正确.
-3. 在干净环境运行构建, smoke test 和归档命令.
-4. 确认 6 个平台与架构组合都有构建, smoke test 和归档步骤.
-5. 确认 release job 等待全部构建成功, 并在缺少产物时失败.
-6. 检查标题, notes 分类, prerelease 状态和产物命名.
-7. 检查 release 条目符合 Conventional Commits 格式, 且 `feat`, `fix` 和 breaking change 分类正确.
-8. 使用包含规范提交, 非规范提交, merge commit 和直接提交的 tag 区间验证归一化结果, 确认没有遗漏或重复条目.
+2. 在 branch, PR 和未填写 tag 的手动触发下确认全部矩阵只构建, 不打包, 不上传发布 artifact, 不创建 release.
+3. 模拟合法与非法 tag, 确认版本校验和 metadata 读取正确.
+4. 在干净环境运行构建, 平台校验和打包命令.
+5. 确认全部平台与架构组合都有 tag 专用的校验, 打包和 artifact 上传步骤.
+6. 确认 release job 等待全部构建成功, 严格检查产物数量并生成 `SHA256SUMS`.
+7. 检查版本化人工 notes 缺失时会失败, 可选 base tag 会被校验, generated notes 会追加在人工正文之后.
+8. 使用 annotated tag 正文时, 确认 checkout 后会精确 refetch 目标 tag object, annotated tag 正文能被保留, lightweight tag 和空正文会失败.
+9. 检查标题, prerelease 状态, 产物命名和权限范围.
+10. 手动填写已有 tag 时确认所有 job 检出该 tag, 且 notes 和 generated notes 都使用该 tag.
+11. 检查 release 首次运行会创建, push 与手动重跑会更新正文并覆盖现有产物.
 
-本地检查不能证明所有 GitHub hosted runner 均可用. 明确说明仍需通过真实 tag run 验证的部分.
+本地检查不能证明所有 GitHub hosted runner 均可用. 明确说明仍需通过真实 tag run 验证的 runner 资格, 平台依赖和发布权限.
 
 ## 实现约束
 
 - 遵循仓库现有的 action pinning 策略. 安全要求较高时使用完整 commit SHA.
 - 对 tag, 版本和路径变量加引号.
+- Bash 步骤使用 `set -euo pipefail`, 数组和 glob 同时处理空匹配.
+- PowerShell 步骤使用 `-LiteralPath` 并在缺少文件时抛出错误.
 - 多行正文通过文件传递, 不要写入普通单行环境变量.
 - 不要在高权限 release job 中构建或执行不可信代码.
 - 不要假设 `*-latest` 的 CPU 架构, 应根据官方 runner 文档显式选择.
