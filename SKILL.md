@@ -1,6 +1,6 @@
 ---
 name: create-github-release-flow
-description: 创建或修改与常规 CI 共用构建矩阵的 GitHub Actions tag 发布流程, 同时支持 push 和 workflow_dispatch 手动触发. 适用于需要校验 tag 与项目版本, 复用既有构建入口, 在 Windows, Linux 和 macOS 原生 runner 上构建 x86_64/aarch64 产物, 按平台校验并打包 tar.gz, zip 或 dmg, 汇总校验和, 组合版本化人工 release notes 或 annotated tag 正文与 GitHub generated notes, 以及幂等创建或更新 GitHub Release 的仓库.
+description: 创建或修改 GitHub Actions 跨平台 CI 和 tag 发布流程. 适用于仓库需要版本校验, 手动发布, release notes, 多平台产物打包或 GitHub Release 自动发布时.
 ---
 
 # 创建 GitHub Release 流
@@ -10,6 +10,7 @@ description: 创建或修改与常规 CI 共用构建矩阵的 GitHub Actions ta
 先确认项目现有的 CI, 构建, 打包和版本规则, 再实现以下流程:
 
 ```text
+release preparation -> write VERSION.md -> commit -> annotated tag from VERSION.md -> push
 branch/PR -> build matrix
 tag -> validate version -> build matrix -> validate/package -> notes/checksums -> create/update release
 manual branch -> build matrix
@@ -108,7 +109,16 @@ PROJECT-VERSION-PLATFORM-ARCH.EXT
 docs/release-notes/VERSION.md
 ```
 
-人工说明是 release 正文的主体, 需要覆盖用户可见变化, 兼容性影响和升级操作. 文件缺失或为空时发布直接失败. 默认结构为:
+将该文件作为人工发布说明的唯一来源. 先提交版本号和说明文件, 再让 annotated tag 指向这个 commit, 并直接使用说明文件创建 tag annotation:
+
+```shell
+git tag -a "v0.1.0" --cleanup=verbatim \
+  -F "docs/release-notes/0.1.0.md"
+```
+
+必须使用 `--cleanup=verbatim`. Git 默认的 `strip` 模式会把 Markdown 中以 `#` 开头的标题当作注释移除. 不要再用 `-m` 单独维护另一份 tag 正文. 如果 tag 已存在或已推送, 不要直接覆盖, 应先报告 annotation 与版本文件不一致.
+
+人工说明需要覆盖用户可见变化, 兼容性影响和升级操作. 文件缺失或为空时发布直接失败. 默认结构为:
 
 - 标题 `PROJECT vVERSION`.
 - 一段版本摘要.
@@ -129,9 +139,7 @@ docs/release-notes/VERSION-base.txt
 
 读取后先用 `git check-ref-format` 校验, 再作为 `previous_tag_name` 传给 API. 不要在 workflow 中硬编码一次性的历史 tag.
 
-如果仓库已有人工 changelog 或 annotated tag 正文作为唯一发布来源, 沿用现有约定, 但仍要保证正文可通过文件传递, 且不会与 generated notes 重复.
-
-使用 annotated tag 正文时, 不要认为 `actions/checkout` 的 `fetch-depth: 0` 一定会保留本地 tag object. Checkout 可能让本地 `refs/tags/TAG` 指向 peeled commit, 导致 annotated tag 被误判为 lightweight tag. Checkout 后必须使用解析得到的 `tag_name` 精确 refetch 远端 tag ref, 再检查 `git cat-file -t` 返回 `tag`, 提取正文并验证正文非空. 手动触发时不得使用指向触发分支的 `github.ref_name`. 具体步骤见 [workflow-patterns.md](references/workflow-patterns.md#annotated-tag-正文).
+Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 refetch 远端 tag ref, 再检查对象类型, 提取 annotation, 并与 `docs/release-notes/VERSION.md` 做字节比较. `fetch-depth: 0` 不能代替精确 refetch. Lightweight tag, 空 annotation 或内容不一致时直接失败. 手动触发时不得使用指向触发分支的 `github.ref_name`. 具体步骤见 [workflow-patterns.md](references/workflow-patterns.md#发布说明与-annotated-tag).
 
 ### 5. 创建或更新 release
 
@@ -157,11 +165,12 @@ docs/release-notes/VERSION-base.txt
 4. 在干净环境运行构建, 平台校验和打包命令.
 5. 确认全部平台与架构组合都有 tag 专用的校验, 打包和 artifact 上传步骤.
 6. 确认 release job 等待全部构建成功, 严格检查产物数量并生成 `SHA256SUMS`.
-7. 检查版本化人工 notes 缺失时会失败, 可选 base tag 会被校验, generated notes 会追加在人工正文之后.
-8. 使用 annotated tag 正文时, 确认 checkout 后会精确 refetch 目标 tag object, annotated tag 正文能被保留, lightweight tag 和空正文会失败.
-9. 检查标题, prerelease 状态, 产物命名和权限范围.
-10. 手动填写已有 tag 时确认所有 job 检出该 tag, 且 notes 和 generated notes 都使用该 tag.
-11. 检查 release 首次运行会创建, push 与手动重跑会更新正文并覆盖现有产物.
+7. 确认版本化 notes 在创建 tag 前已提交, `git tag -F` 使用 `--cleanup=verbatim`, annotation 保留 Markdown 标题并与文件一致.
+8. 确认 checkout 后会精确 refetch 目标 tag object, lightweight tag, 空 annotation 和内容不一致都会失败.
+9. 检查可选 base tag 会被校验, generated notes 会追加在人工正文之后.
+10. 检查标题, prerelease 状态, 产物命名和权限范围.
+11. 手动填写已有 tag 时确认所有 job 检出该 tag, 且 notes 和 generated notes 都使用该 tag.
+12. 检查 release 首次运行会创建, push 与手动重跑会更新正文并覆盖现有产物.
 
 本地检查不能证明所有 GitHub hosted runner 均可用. 明确说明仍需通过真实 tag run 验证的 runner 资格, 平台依赖和发布权限.
 

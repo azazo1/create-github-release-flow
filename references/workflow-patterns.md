@@ -11,8 +11,7 @@
   - [平台与架构](#平台与架构)
   - [Rust 版本校验](#rust-版本校验)
   - [平台产物校验](#平台产物校验)
-  - [版本化 release notes](#版本化-release-notes)
-  - [Annotated tag 正文](#annotated-tag-正文)
+  - [发布说明与 annotated tag](#发布说明与-annotated-tag)
   - [校验和与数量检查](#校验和与数量检查)
   - [创建或更新 release](#创建或更新-release)
 
@@ -225,11 +224,63 @@ Windows runner 示例:
 
 Linux 的 `EXPECTED_FORMAT` 使用 `ELF`, macOS 使用 `Mach-O`. 还需要检查应用包结构时, 在平台打包脚本返回后追加路径断言.
 
-## 版本化 release notes
+## 发布说明与 annotated tag
 
-将人工说明作为正文主体, 再追加 GitHub generated notes:
+将 `docs/release-notes/VERSION.md` 作为人工发布说明的唯一来源. 先提交版本号和说明文件, 再让 annotated tag 指向该 commit. 使用说明文件直接创建 tag:
+
+```shell
+git tag -a "v0.1.0" --cleanup=verbatim \
+  -F "docs/release-notes/0.1.0.md"
+```
+
+必须使用 `--cleanup=verbatim`, 否则 Git 默认的 `strip` 模式会删除 Markdown 中以 `#` 开头的标题. 不要再用 `-m` 维护另一份 tag 正文. Tag 已存在或已推送时不要直接覆盖.
+
+Release job 按 `source_ref` 完整 checkout tags 后, 精确 refetch 远端 tag object, 提取 annotation, 并与版本化说明文件比较:
 
 ```yaml
+- name: 重新获取 annotated tag object
+  env:
+    TAG_NAME: ${{ needs.version.outputs.tag_name }}
+  shell: bash
+  run: |
+    set -euo pipefail
+    git check-ref-format "refs/tags/$TAG_NAME"
+    git fetch --force origin \
+      "refs/tags/$TAG_NAME:refs/tags/$TAG_NAME"
+
+- name: 校验 tag annotation
+  env:
+    TAG_NAME: ${{ needs.version.outputs.tag_name }}
+    VERSION: ${{ needs.version.outputs.version }}
+  shell: bash
+  run: |
+    set -euo pipefail
+    tag_ref="refs/tags/$TAG_NAME"
+    manual_notes="docs/release-notes/$VERSION.md"
+
+    if [[ ! -s "$manual_notes" ]]; then
+      echo "缺少 release notes: $manual_notes" >&2
+      exit 1
+    fi
+
+    tag_type="$(git cat-file -t "$tag_ref")"
+    if [[ "$tag_type" != "tag" ]]; then
+      echo "发布 tag 必须是 annotated tag: $TAG_NAME" >&2
+      exit 1
+    fi
+
+    git cat-file tag "$tag_ref" | sed '1,/^$/d' > tag-notes.md
+    if ! grep -q '[^[:space:]]' tag-notes.md; then
+      echo "发布 tag 的 annotation 不能为空: $TAG_NAME" >&2
+      exit 1
+    fi
+
+    if ! cmp -s "$manual_notes" tag-notes.md; then
+      echo "发布 tag 的 annotation 与 $manual_notes 不一致" >&2
+      diff -u "$manual_notes" tag-notes.md || true
+      exit 1
+    fi
+
 - name: 生成 release notes
   env:
     GH_TOKEN: ${{ github.token }}
@@ -240,12 +291,6 @@ Linux 的 `EXPECTED_FORMAT` 使用 `ELF`, macOS 使用 `Mach-O`. 还需要检查
     set -euo pipefail
     manual_notes="docs/release-notes/$VERSION.md"
     base_tag_file="docs/release-notes/$VERSION-base.txt"
-
-    if [[ ! -s "$manual_notes" ]]; then
-      echo "缺少 release notes: $manual_notes" >&2
-      exit 1
-    fi
-
     api_args=(
       --method POST
       "repos/$GITHUB_REPOSITORY/releases/generate-notes"
@@ -270,50 +315,7 @@ Linux 的 `EXPECTED_FORMAT` 使用 `ELF`, macOS 使用 `Mach-O`. 还需要检查
     fi
 ```
 
-Release job 需要按 `source_ref` 完整 checkout tags. `git rev-parse HEAD` 保证手动发布使用目标 tag 的 commit, 而不是 workflow dispatch 所在 branch 的 `github.sha`. Base tag 文件只处理自动推导不正确的版本, 不要为每个版本都创建.
-
-## Annotated tag 正文
-
-仅在仓库明确使用 annotated tag 正文作为人工 release notes 来源时使用本节. `actions/checkout` 可能把本地 `refs/tags/TAG` 写成 peeled commit, `fetch-depth: 0` 不能保证该 ref 仍指向 tag object.
-
-检出发布 tag 后, 使用解析得到的 `tag_name` 精确 refetch 远端 tag ref, 再验证对象类型并提取正文:
-
-```yaml
-- name: 重新获取 annotated tag object
-  env:
-    TAG_NAME: ${{ needs.version.outputs.tag_name }}
-  shell: bash
-  run: |
-    set -euo pipefail
-    git check-ref-format "refs/tags/$TAG_NAME"
-    git fetch --force origin \
-      "refs/tags/$TAG_NAME:refs/tags/$TAG_NAME"
-
-- name: 提取 annotated tag 正文
-  env:
-    TAG_NAME: ${{ needs.version.outputs.tag_name }}
-  shell: bash
-  run: |
-    set -euo pipefail
-    tag_ref="refs/tags/$TAG_NAME"
-    tag_type="$(git cat-file -t "$tag_ref")"
-
-    if [[ "$tag_type" != "tag" ]]; then
-      echo "发布 tag 必须是带有手写说明的 annotated tag: $TAG_NAME" >&2
-      exit 1
-    fi
-
-    git for-each-ref \
-      --format='%(contents:subject)%0a%0a%(contents:body)' \
-      "$tag_ref" > release-notes.md
-
-    if ! grep -q '[^[:space:]]' release-notes.md; then
-      echo "发布 tag 的手写说明不能为空: $TAG_NAME" >&2
-      exit 1
-    fi
-```
-
-手动发布必须使用 release context 输出的 `tag_name`. `github.ref_name` 在 `workflow_dispatch` 中通常是触发 workflow 的 branch, 不能用来定位待发布 tag. 如果还要追加 generated notes, 将其追加到 `release-notes.md`, 不要覆盖已经提取的正文.
+`git cat-file tag` 保留原始 annotation, 去除 tag object header 后可以与 Markdown 文件做字节比较. 不要用 `for-each-ref --format='%(contents)'` 做这个比较, 因为它会额外附加换行. 手动发布必须使用 release context 输出的 `tag_name`, `github.ref_name` 通常只是触发 workflow 的 branch. Base tag 文件只处理自动推导不正确的版本, 不要为每个版本都创建.
 
 ## 校验和与数量检查
 
