@@ -106,14 +106,14 @@ PROJECT-VERSION-PLATFORM-ARCH.EXT
 每个版本维护一个人工编写的 release notes 文件, 默认路径为:
 
 ```text
-docs/release-notes/VERSION.md
+docs/changelog/VERSION.md
 ```
 
 将该文件作为人工发布说明的唯一来源. 先提交版本号和说明文件, 再让 annotated tag 指向这个 commit, 并直接使用说明文件创建 tag annotation:
 
 ```shell
 git tag -a "v0.1.0" --cleanup=verbatim \
-  -F "docs/release-notes/0.1.0.md"
+  -F "docs/changelog/0.1.0.md"
 ```
 
 必须使用 `--cleanup=verbatim`. Git 默认的 `strip` 模式会把 Markdown 中以 `#` 开头的标题当作注释移除. 不要再用 `-m` 单独维护另一份 tag 正文. 如果 tag 已存在或已推送, 不要直接覆盖, 应先报告 annotation 与版本文件不一致.
@@ -134,12 +134,12 @@ git tag -a "v0.1.0" --cleanup=verbatim \
 默认让 GitHub 根据当前 tag 自动选择上一个 tag. 如果 release 序列有断点, 补发版本或基线不能自动推导, 可维护以下可选文件:
 
 ```text
-docs/release-notes/VERSION-base.txt
+docs/changelog/VERSION-base.txt
 ```
 
 读取后先用 `git check-ref-format` 校验, 再作为 `previous_tag_name` 传给 API. 不要在 workflow 中硬编码一次性的历史 tag.
 
-Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 refetch 远端 tag ref, 再检查对象类型, 提取 annotation, 并与 `docs/release-notes/VERSION.md` 做字节比较. `fetch-depth: 0` 不能代替精确 refetch. Lightweight tag, 空 annotation 或内容不一致时直接失败. 手动触发时不得使用指向触发分支的 `github.ref_name`. 具体步骤见 [workflow-patterns.md](references/workflow-patterns.md#发布说明与-annotated-tag).
+Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 refetch 远端 tag ref, 再检查对象类型, 提取 annotation, 并与 `docs/changelog/VERSION.md` 做字节比较. `fetch-depth: 0` 不能代替精确 refetch. Lightweight tag, 空 annotation 或内容不一致时直接失败. 手动触发时不得使用指向触发分支的 `github.ref_name`. 具体步骤见 [workflow-patterns.md](references/workflow-patterns.md#发布说明与-annotated-tag).
 
 ### 5. 创建或更新 release
 

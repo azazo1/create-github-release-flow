@@ -226,11 +226,11 @@ Linux 的 `EXPECTED_FORMAT` 使用 `ELF`, macOS 使用 `Mach-O`. 还需要检查
 
 ## 发布说明与 annotated tag
 
-将 `docs/release-notes/VERSION.md` 作为人工发布说明的唯一来源. 先提交版本号和说明文件, 再让 annotated tag 指向该 commit. 使用说明文件直接创建 tag:
+将 `docs/changelog/VERSION.md` 作为人工发布说明的唯一来源. 先提交版本号和说明文件, 再让 annotated tag 指向该 commit. 使用说明文件直接创建 tag:
 
 ```shell
 git tag -a "v0.1.0" --cleanup=verbatim \
-  -F "docs/release-notes/0.1.0.md"
+  -F "docs/changelog/0.1.0.md"
 ```
 
 必须使用 `--cleanup=verbatim`, 否则 Git 默认的 `strip` 模式会删除 Markdown 中以 `#` 开头的标题. 不要再用 `-m` 维护另一份 tag 正文. Tag 已存在或已推送时不要直接覆盖.
@@ -256,7 +256,7 @@ Release job 按 `source_ref` 完整 checkout tags 后, 精确 refetch 远端 tag
   run: |
     set -euo pipefail
     tag_ref="refs/tags/$TAG_NAME"
-    manual_notes="docs/release-notes/$VERSION.md"
+    manual_notes="docs/changelog/$VERSION.md"
 
     if [[ ! -s "$manual_notes" ]]; then
       echo "缺少 release notes: $manual_notes" >&2
@@ -289,8 +289,8 @@ Release job 按 `source_ref` 完整 checkout tags 后, 精确 refetch 远端 tag
   shell: bash
   run: |
     set -euo pipefail
-    manual_notes="docs/release-notes/$VERSION.md"
-    base_tag_file="docs/release-notes/$VERSION-base.txt"
+    manual_notes="docs/changelog/$VERSION.md"
+    base_tag_file="docs/changelog/$VERSION-base.txt"
     api_args=(
       --method POST
       "repos/$GITHUB_REPOSITORY/releases/generate-notes"
