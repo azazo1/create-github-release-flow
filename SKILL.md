@@ -17,7 +17,7 @@ manual branch -> build matrix
 manual tag -> validate version -> build matrix -> validate/package -> notes/checksums -> create/update release
 ```
 
-默认让普通 CI, tag 发布和手动触发复用同一套构建矩阵. 普通 branch, PR 和未指定 tag 的手动触发只构建. Tag push 或显式指定已有 tag 的手动触发额外执行版本校验, 产物校验, 打包, 上传和发布. 如果仓库已有独立发布 workflow, 可以保留分离结构, 但不要复制构建逻辑.
+默认让普通 CI, tag 发布和手动触发复用同一套构建矩阵. 普通 branch 和 PR 只构建. Tag push 或显式指定已有 tag 的手动触发执行版本校验和发布. 如果仓库已有独立发布 workflow, 可以保留分离结构, 但不要复制构建逻辑.
 
 构建, 校验或产物完整性检查失败时不得创建公开 release.
 
@@ -44,7 +44,7 @@ manual tag -> validate version -> build matrix -> validate/package -> notes/chec
 
 如果项目文件中保存版本号, 使用结构化 metadata 命令读取, 规范化 tag 后严格比较. Rust 项目优先使用 `cargo metadata --locked --no-deps --format-version 1`, 不要用文本正则读取 `Cargo.toml`. 如果 tag 是唯一版本来源, 不要额外维护第二份版本状态.
 
-添加 `workflow_dispatch` 和可选字符串 input `tag`. 空值表示只对用户在 GitHub UI 或 API 中选择的 ref 运行构建. 非空值表示发布该已有 tag. 不要让手动发布隐式使用触发 workflow 的 branch commit.
+添加 `workflow_dispatch` 和可选字符串 input `tag`. 空值表示对用户在 GitHub UI 或 API 中选择的 ref 运行构建并上传 Actions artifact, 但不创建 release. 非空值表示发布该已有 tag. 不要让手动发布隐式使用触发 workflow 的 branch commit.
 
 在 `version` job 的第一个步骤统一解析并输出:
 
@@ -60,7 +60,7 @@ manual tag -> validate version -> build matrix -> validate/package -> notes/chec
 - `version` job 保持可被构建 job 依赖, 但版本校验步骤只在 `is_release` 为 `true` 时执行.
 - 构建 job 使用 `source_ref` 检出代码, 确保手动发布构建的是目标 tag.
 - 构建矩阵在 branch, PR, tag 和手动触发上执行.
-- 二进制发布校验, 打包和 artifact 上传步骤只在 `is_release` 为 `true` 时执行.
+- 产物校验, 打包和 artifact 上传步骤在 `is_release` 为 `true` 或事件为 `workflow_dispatch` 时执行.
 - release job 只在 `is_release` 为 `true` 时执行, 并依赖版本校验和全部矩阵构建.
 
 为每个 ref 或手动输入 tag 设置 concurrency group, 并使用 `cancel-in-progress: false`, 防止同一 tag 的 push 和手动发布并发修改 release.
@@ -160,7 +160,7 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 ### 6. 验证
 
 1. 使用 YAML parser 和项目已有的 action linter 检查 workflow.
-2. 在 branch, PR 和未填写 tag 的手动触发下确认全部矩阵只构建, 不打包, 不上传发布 artifact, 不创建 release.
+2. 确认 branch, PR 和未填写 tag 的手动触发符合第 2 节定义的构建与发布条件.
 3. 模拟合法与非法 tag, 确认版本校验和 metadata 读取正确.
 4. 在干净环境运行构建, 平台校验和打包命令.
 5. 确认全部平台与架构组合都有 tag 专用的校验, 打包和 artifact 上传步骤.

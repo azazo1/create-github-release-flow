@@ -32,7 +32,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "要发布的已有 tag, 留空时只构建"
+        description: "要发布的已有 tag, 留空时只构建并上传 artifact"
         required: false
         type: string
 
@@ -44,7 +44,7 @@ concurrency:
   cancel-in-progress: false
 ```
 
-收窄 tag pattern 只能减少无效运行, 不能替代严格的版本校验. 手动触发的 `tag` 为空时只运行所选 ref 的构建, 非空时发布该已有 tag.
+收窄 tag pattern 只能减少无效运行, 不能替代严格的版本校验. 手动触发是否发布由 `tag` 是否为空决定.
 
 ## CI, tag 与手动条件
 
@@ -118,13 +118,18 @@ jobs:
       - name: 构建
         run: PROJECT_BUILD_COMMAND
 
-      - name: 打包发布产物
-        if: needs.version.outputs.is_release == 'true'
+      - name: 打包构建产物
+        if: ${{ github.event_name == 'workflow_dispatch' || needs.version.outputs.is_release == 'true' }}
         run: PROJECT_PACKAGE_COMMAND
 
-      - name: 上传发布产物
-        if: needs.version.outputs.is_release == 'true'
+      - name: 上传构建产物
+        if: ${{ github.event_name == 'workflow_dispatch' || needs.version.outputs.is_release == 'true' }}
         uses: actions/upload-artifact@v4
+        with:
+          name: PROJECT-${{ matrix.platform }}-${{ matrix.arch }}
+          path: EXPECTED_PACKAGE_PATH
+          if-no-files-found: error
+          retention-days: 14
 
   release:
     if: needs.version.outputs.is_release == 'true'
@@ -196,7 +201,7 @@ Unix runner 示例:
 
 ```yaml
 - name: 校验 Unix 二进制文件
-  if: needs.version.outputs.is_release == 'true'
+  if: ${{ github.event_name == 'workflow_dispatch' || needs.version.outputs.is_release == 'true' }}
   shell: bash
   run: |
     set -euo pipefail
@@ -209,7 +214,7 @@ Windows runner 示例:
 
 ```yaml
 - name: 校验 Windows 二进制文件
-  if: needs.version.outputs.is_release == 'true'
+  if: ${{ github.event_name == 'workflow_dispatch' || needs.version.outputs.is_release == 'true' }}
   shell: pwsh
   run: |
     $binary = "target/TARGET/release/PROJECT.exe"
