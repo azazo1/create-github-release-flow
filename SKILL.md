@@ -38,6 +38,23 @@ manual tag -> validate version -> build matrix -> validate/package -> notes/chec
 
 在项目需要新增 Just recipe 时, 统一提供 `just dist`. 该 recipe 根据当前运行平台执行相应构建, 不要新增 `package-macos`, `package-windows` 等按平台命名的 recipe.
 
+例如, 为同一 `dist` recipe 添加互斥的平台属性:
+
+```justfile
+# 根据当前平台生成发布产物.
+[windows]
+dist:
+    powershell -NoProfile -File scripts/dist-windows.ps1
+
+[macos]
+dist:
+    ./scripts/dist-macos.sh
+
+[linux]
+dist:
+    ./scripts/dist-linux.sh
+```
+
 实现具体 YAML 片段时按需读取 [workflow-patterns.md](references/workflow-patterns.md), 不要一次性复制所有示例.
 
 ### 2. 组织 CI, tag 与手动触发
