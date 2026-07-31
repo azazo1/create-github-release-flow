@@ -33,6 +33,14 @@ manual tag -> validate version -> build matrix -> validate/package -> notes/chec
 - 二进制, 应用包和归档的输出路径.
 - 各平台的编译 target, runner 和运行时兼容要求.
 - release notes, changelog 和历史 release 的维护方式.
+- CLI, TUI, GUI 等展示版本号的交互位置及其版本信息的生成方式.
+
+CLI, TUI, GUI 等可能展示版本号的交互位置 (如 `--version`, About 对话框) 必须显示当前构建版本并标注构建 commit:
+
+- 构建 commit 恰好是某个版本 tag 时, 直接显示该 tag, 例如 `v1.2.3`.
+- 构建处于非 tag commit 时, 在最近一个版本 tag 后追加 `-` 和 6 位短 hash, 例如 `v1.2.3-a1b2c3`.
+- HEAD 工作区有未提交改动时, 改用 `^` 分隔, 例如 `v1.2.3^a1b2c3`.
+- 基础版本号样式跟随最近一个版本 tag, 不要固定假设带 `v` 前缀或三段式 SemVer.
 
 优先调用项目已有的 task runner 或打包脚本. 平台专用打包包含应用目录, 图标, metadata 或签名准备时, 将逻辑放在项目脚本中, 不要把完整实现内联到 workflow.
 
@@ -104,6 +112,7 @@ dist:
 每个平台使用正式构建命令和 lockfile. 在归档前选择适合产物类型的最小校验:
 
 - 可安全启动的 CLI 运行 `--version` 或等价 smoke test.
+- CLI 的 `--version` 输出需符合版本显示约定.
 - 不适合在 CI 中启动的 GUI 或服务程序, 检查目标文件存在, 可执行权限和 ELF, PE 或 Mach-O 文件格式.
 - 应用包或安装镜像检查目录结构, 主程序和必要资源.
 - 无法直接运行的交叉编译产物使用模拟器, 加载检查或文件格式检查.
@@ -192,6 +201,7 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 10. 检查标题, prerelease 状态, 产物命名和权限范围.
 11. 手动填写已有 tag 时确认所有 job 检出该 tag, 且 notes 和 generated notes 都使用该 tag.
 12. 检查 release 首次运行会创建, push 与手动重跑会更新正文并覆盖现有产物.
+13. 在精确 tag, 非 tag commit 和脏 HEAD 三种状态下, 检查 CLI/TUI/GUI 的版本显示符合约定.
 
 本地检查不能证明所有 GitHub hosted runner 均可用. 明确说明仍需通过真实 tag run 验证的 runner 资格, 平台依赖和发布权限.
 
