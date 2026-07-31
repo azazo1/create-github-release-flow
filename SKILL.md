@@ -99,6 +99,8 @@ dist:
 
 在实现时查阅 GitHub 官方 runner 文档, 确认当前可用的 runner 标签和仓库资格. 优先使用对应系统和架构的原生 runner. 无法原生构建时使用项目成熟的交叉编译工具链, 并明确 linker, sysroot 和系统库要求.
 
+> 注: 不要使用已经退役的 runner, 比如 macos-13-intel 等.
+
 每个平台使用正式构建命令和 lockfile. 在归档前选择适合产物类型的最小校验:
 
 - 可安全启动的 CLI 运行 `--version` 或等价 smoke test.
