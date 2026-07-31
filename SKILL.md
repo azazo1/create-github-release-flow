@@ -36,6 +36,8 @@ manual tag -> validate version -> build matrix -> validate/package -> notes/chec
 
 优先调用项目已有的 task runner 或打包脚本. 平台专用打包包含应用目录, 图标, metadata 或签名准备时, 将逻辑放在项目脚本中, 不要把完整实现内联到 workflow.
 
+在项目需要新增 Just recipe 时, 统一提供 `just dist`. 该 recipe 根据当前运行平台执行相应构建, 不要新增 `package-macos`, `package-windows` 等按平台命名的 recipe.
+
 实现具体 YAML 片段时按需读取 [workflow-patterns.md](references/workflow-patterns.md), 不要一次性复制所有示例.
 
 ### 2. 组织 CI, tag 与手动触发
