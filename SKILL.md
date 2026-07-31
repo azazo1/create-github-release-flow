@@ -42,6 +42,8 @@ CLI, TUI, GUI 等可能展示版本号的交互位置 (如 `--version`, About �
 - HEAD 工作区有未提交改动时, 改用 `^` 分隔, 例如 `v1.2.3^a1b2c3`.
 - 基础版本号样式跟随最近一个版本 tag, 不要固定假设带 `v` 前缀或三段式 SemVer.
 
+> 版本号显示必须自动生成, 而不是手动编辑写死.
+
 优先调用项目已有的 task runner 或打包脚本. 平台专用打包包含应用目录, 图标, metadata 或签名准备时, 将逻辑放在项目脚本中, 不要把完整实现内联到 workflow.
 
 在项目需要新增 Just recipe 时, 统一提供 `just dist`. 该 recipe 根据当前运行平台执行相应构建, 不要新增 `package-macos`, `package-windows` 等按平台命名的 recipe.
