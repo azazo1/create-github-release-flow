@@ -1,6 +1,6 @@
 ---
 name: create-github-release-flow
-description: 创建或修改 GitHub Actions 跨平台 CI 和 tag 发布流程. 适用于仓库需要版本校验, 手动发布, release notes, 多平台产物打包或 GitHub Release 自动发布时.
+description: 创建或修改 GitHub Actions 跨平台 CI 和 tag 发布流程. 适用于仓库需要版本校验, 手动发布, release notes, 多平台产物打包或 GitHub Release 自动发布时. 打 tag push 必读.
 ---
 
 # 创建 GitHub Release 流
