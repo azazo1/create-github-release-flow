@@ -315,10 +315,12 @@ Release job 按 `source_ref` 完整 checkout tags 后, 精确 refetch 远端 tag
     cp "$manual_notes" release-notes.md
 
     if [[ -s generated-notes.md ]]; then
-      printf '\n\n' >> release-notes.md
+      printf '\n---\n\n' >> release-notes.md
       cat generated-notes.md >> release-notes.md
     fi
 ```
+
+自动生成内容用 `---` 与人工正文分隔, 避免 PR 列表直接贴在人工正文后面.
 
 `git cat-file tag` 保留原始 annotation, 去除 tag object header 后可以与 Markdown 文件做字节比较. 不要用 `for-each-ref --format='%(contents)'` 做这个比较, 因为它会额外附加换行. 手动发布必须使用 release context 输出的 `tag_name`, `github.ref_name` 通常只是触发 workflow 的 branch. Base tag 文件只处理自动推导不正确的版本, 不要为每个版本都创建.
 

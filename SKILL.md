@@ -150,18 +150,59 @@ git tag -a "v0.1.0" --cleanup=verbatim \
 
 必须使用 `--cleanup=verbatim`. Git 默认的 `strip` 模式会把 Markdown 中以 `#` 开头的标题当作注释移除. 不要再用 `-m` 单独维护另一份 tag 正文. 如果 tag 已存在或已推送, 不要直接覆盖, 应先报告 annotation 与版本文件不一致.
 
-人工说明需要覆盖用户可见变化, 兼容性影响和升级操作. 文件缺失或为空时发布直接失败. 默认结构为:
+人工说明需要覆盖用户可见变化, 兼容性影响和升级操作. 文件缺失或为空时发布直接失败. 使用以下模板, 只保留实际有内容的 section:
 
-- 标题 `PROJECT vVERSION`.
-- 一段版本摘要.
-- 仅在有实际内容时添加 `Highlights` 和 `Upgrade Notes`.
-- 按产品领域组织主要变化, 不强制套用空的固定分类.
+```markdown
+# PROJECT vVERSION
+
+Date: YYYY-MM-DD
+
+本版本主要带来 ... 使用旧配置或旧 API 的用户请先阅读 Upgrade Notes 再升级.
+
+## Highlights
+
+- 最多 3-5 条最值得关注的用户可见变化.
+- 每条使用动词或用户视角开头, 不堆叠内部实现细节.
+
+## Breaking Changes
+
+- 变更内容和影响范围. 迁移方式: 具体操作步骤或文档链接.
+
+## Upgrade Notes
+
+1. 升级前需要完成的备份或检查.
+2. 升级后需要执行的操作.
+3. 验证升级成功的方法.
+
+## Features
+
+- CLI/API/插件等产品领域: 新增能力及对用户的意义.
+
+## Bug Fixes
+
+- 平台或产品领域: 修复的问题及受影响场景.
+
+## Performance
+
+- 性能变化及可观察到的效果.
+
+## Deprecations
+
+- 废弃内容及计划移除版本, 给出替代方案.
+```
+
+- `Highlights` 只放最有价值的 3-5 条, 不重复后面分类里的每一条.
+- `Breaking Changes` 必须排在 `Upgrade Notes` 之前, 每条写迁移方式.
+- `Features`, `Bug Fixes`, `Performance`, `Deprecations` 等 section 按实际内容保留, 没有内容时不要列出空标题.
+- 分类可按产品领域组织, 例如 `CLI:`, `API:`, `插件:`, 不强制使用固定分类.
+- 每条只写用户可感知的结果, 合并同一 PR 的 merge 与 squash 痕迹, 避免把完整提交列表再抄入正文.
+- 如果项目还维护根目录 `CHANGELOG.md`, 每个版本只放版本号, 日期, 摘要和指向 release 的链接, 不复制完整正文, 保持版本文件为唯一来源.
 
 生成内容前检查上一个 release tag 到当前 tag 之间的 merged PR, 直接提交和实际 diff. Conventional Commits 中的 `feat`, `fix`, `perf`, `docs`, `build`, `ci`, `refactor`, `test`, `chore` 和 `revert` 可用于判断影响类型. 对非规范标题结合 PR metadata 和 diff 判断, 不要只根据措辞猜测.
 
-不要编写自定义自动化脚本生成这份人工说明. 人工整理时合并同一 PR 的 merge 与 squash 痕迹, 避免把完整提交列表再抄入正文. Breaking change 必须说明迁移方式, 不能只作为普通功能条目出现.
+不要编写自定义自动化脚本生成这份人工说明.
 
-在 workflow 中调用 GitHub Releases API 的 `generate-notes` 接口生成补充内容, 并将其追加到人工说明之后. Generated notes 用于补充贡献者, PR 列表和完整 diff 链接, 不替代人工说明. `target_commitish` 使用 release job 检出目标 tag 后的 `git rev-parse HEAD`, 不要在手动发布时直接使用触发分支的 `github.sha`.
+在 workflow 中调用 GitHub Releases API 的 `generate-notes` 接口生成补充内容, 用 `---` 分隔后追加到人工说明之后. Generated notes 用于补充贡献者, PR 列表和完整 diff 链接, 不替代人工说明. `target_commitish` 使用 release job 检出目标 tag 后的 `git rev-parse HEAD`, 不要在手动发布时直接使用触发分支的 `github.sha`.
 
 默认让 GitHub 根据当前 tag 自动选择上一个 tag. 如果 release 序列有断点, 补发版本或基线不能自动推导, 可维护以下可选文件:
 
@@ -197,9 +238,9 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 4. 在干净环境运行构建, 平台校验和打包命令.
 5. 确认全部平台与架构组合都有 tag 专用的校验, 打包和 artifact 上传步骤.
 6. 确认 release job 等待全部构建成功, 严格检查产物数量并生成 `SHA256SUMS`.
-7. 确认版本化 notes 在创建 tag 前已提交, `git tag -F` 使用 `--cleanup=verbatim`, annotation 保留 Markdown 标题并与文件一致.
+7. 确认版本化 notes 在创建 tag 前已提交, 遵循 release notes 模板, `git tag -F` 使用 `--cleanup=verbatim`, annotation 保留 Markdown 标题并与文件一致.
 8. 确认 checkout 后会精确 refetch 目标 tag object, lightweight tag, 空 annotation 和内容不一致都会失败.
-9. 检查可选 base tag 会被校验, generated notes 会追加在人工正文之后.
+9. 检查可选 base tag 会被校验, generated notes 会用 `---` 分隔并追加在人工正文之后.
 10. 检查标题, prerelease 状态, 产物命名和权限范围.
 11. 手动填写已有 tag 时确认所有 job 检出该 tag, 且 notes 和 generated notes 都使用该 tag.
 12. 检查 release 首次运行会创建, push 与手动重跑会更新正文并覆盖现有产物.
