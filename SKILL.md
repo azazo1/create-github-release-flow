@@ -46,7 +46,7 @@ CLI, TUI, GUI 等可能展示版本号的交互位置 (如 `--version`, About �
 
 优先调用项目已有的 task runner 或打包脚本. 平台专用打包包含应用目录, 图标, metadata 或签名准备时, 将逻辑放在项目脚本中, 不要把完整实现内联到 workflow.
 
-在项目需要新增 Just recipe 时, 统一提供 `just dist`. 该 recipe 根据当前运行平台执行相应构建, 不要新增 `package-macos`, `package-windows` 等按平台命名的 recipe.
+在项目需要新增 Just recipe 时, 统一提供 `just dist`. 该 recipe 根据当前运行平台执行相应构建, 必须不接受任何参数, 不要声明 `*args` 或位置参数, 也不要新增 `package-macos`, `package-windows` 等按平台命名的 recipe.
 
 例如, 为同一 `dist` recipe 添加互斥的平台属性:
 
