@@ -38,8 +38,8 @@ manual tag -> validate version -> build matrix -> validate/package -> notes/chec
 CLI, TUI, GUI 等可能展示版本号的交互位置 (如 `--version`, About 对话框) 必须显示当前构建版本并标注构建 commit:
 
 - 构建 commit 恰好是某个版本 tag 时, 直接显示该 tag, 例如 `v1.2.3`.
-- 构建处于非 tag commit 时, 在最近一个版本 tag 后追加 `-` 和 6 位短 hash, 例如 `v1.2.3-a1b2c3`.
-- HEAD 工作区有未提交改动时, 改用 `^` 分隔, 例如 `v1.2.3^a1b2c3`.
+- 构建处于非 tag commit 时, 在最近一个版本 tag 后追加 `-` 和 7 位短 hash, 例如 `v1.2.3-a1b2c3d`.
+- HEAD 工作区有未提交改动时, 改用 `^` 分隔, 例如 `v1.2.3^a1b2c3d`.
 - 基础版本号样式跟随最近一个版本 tag, 不要固定假设带 `v` 前缀或三段式 SemVer.
 
 > 版本号显示必须自动生成, 而不是手动编辑写死.
