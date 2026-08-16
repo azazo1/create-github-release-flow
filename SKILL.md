@@ -29,6 +29,7 @@ manual tag -> validate version -> build matrix -> validate/package -> notes/chec
 
 - tag 格式和版本来源.
 - 正式构建命令与 lockfile.
+- 项目当前或可用的依赖与构建缓存机制, 包括专用缓存 action 和缓存路径.
 - branch, PR 和 tag 当前执行的 job.
 - 二进制, 应用包和归档的输出路径.
 - 各平台的编译 target, runner 和运行时兼容要求.
@@ -110,6 +111,14 @@ dist:
 在实现时查阅 GitHub 官方 runner 文档, 确认当前可用的 runner 标签和仓库资格. 优先使用对应系统和架构的原生 runner. 无法原生构建时使用项目成熟的交叉编译工具链, 并明确 linker, sysroot 和系统库要求.
 
 > 注: 不要使用已经退役的 runner, 比如 macos-13-intel 等.
+
+构建 job 应配置依赖与构建缓存, 但缓存只用于加速, 不能作为发布正确性来源:
+
+- 优先使用该语言或工具链已验证的专用缓存 action, 例如 setup action 内置缓存或社区广泛使用的专用 cache action.
+- 没有可用专用机制时, 回退到 `actions/cache@v4`, 缓存路径覆盖包管理器缓存和构建缓存, 不缓存发布产物.
+- `actions/cache@v4` 的 key 包含 runner 系统, 矩阵架构和 lockfile hash, 并使用 `restore-keys` 回退; 不同平台和架构必须隔离.
+- 缓存 miss 或恢复失败不能导致构建失败, 干净环境必须能完整构建.
+- 最终产物必须通过 artifact 汇总, 不依赖缓存保存发布文件.
 
 每个平台使用正式构建命令和 lockfile. 在归档前选择适合产物类型的最小校验:
 
@@ -245,6 +254,7 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 11. 手动填写已有 tag 时确认所有 job 检出该 tag, 且 notes 和 generated notes 都使用该 tag.
 12. 检查 release 首次运行会创建, push 与手动重跑会更新正文并覆盖现有产物.
 13. 在精确 tag, 非 tag commit 和脏 HEAD 三种状态下, 检查 CLI/TUI/GUI 的版本显示符合约定.
+14. 确认缓存机制选择顺序正确, 专用缓存与项目实际匹配, 没有重复缓存同一路径, 且 fallback 缓存 miss 时仍能完整构建.
 
 本地检查不能证明所有 GitHub hosted runner 均可用. 明确说明仍需通过真实 tag run 验证的 runner 资格, 平台依赖和发布权限.
 
@@ -256,4 +266,5 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 - PowerShell 步骤使用 `-LiteralPath` 并在缺少文件时抛出错误.
 - 多行正文通过文件传递, 不要写入普通单行环境变量.
 - 不要在高权限 release job 中构建或执行不可信代码.
+- 依赖和构建缓存只配置在低权限构建 job, 不要在高权限 release job 中恢复或写入缓存.
 - 不要假设 `*-latest` 的 CPU 架构, 应根据官方 runner 文档显式选择.

@@ -8,6 +8,7 @@
   - [目录](#目录)
   - [触发与并发](#触发与并发)
   - [CI, tag 与手动条件](#ci-tag-与手动条件)
+  - [依赖与构建缓存](#依赖与构建缓存)
   - [平台与架构](#平台与架构)
   - [Rust 版本校验](#rust-版本校验)
   - [平台产物校验](#平台产物校验)
@@ -146,6 +147,36 @@ jobs:
 ```
 
 没有 tag 时 `version` job 可以成功完成但不产生 version output. 只在 `is_release` 条件的步骤和 job 中消费该 output. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout.
+
+## 依赖与构建缓存
+
+构建 job 应配置依赖与构建缓存, 但缓存只用于加速, 不能作为发布正确性来源. 优先使用该语言或工具链已验证的专用缓存机制, 没有可用专用机制时才回退到通用缓存.
+
+常用优先方案:
+
+| 工具链/语言 | 优先缓存机制 |
+| --- | --- |
+| Rust | `Swatinem/rust-cache` |
+| Node.js | `actions/setup-node` 的 `cache` 输入 |
+| Python | `actions/setup-python` 的 `cache` 输入 |
+| Go | `actions/setup-go` 的 `cache` 输入 |
+| uv | `astral-sh/setup-uv` 的 `enable-cache` 输入 |
+
+使用前确认对应 action 的当前稳定版本, 项目 lockfile 和仓库 pinning 策略. 专用缓存不可用或不匹配项目结构时, 使用通用缓存:
+
+```yaml
+- name: 恢复依赖与构建缓存
+  uses: actions/cache@v4
+  with:
+    path: |
+      PROJECT_DEPENDENCY_CACHE_PATH
+      PROJECT_BUILD_CACHE_PATH
+    key: ${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('PROJECT_LOCKFILE') }}
+    restore-keys: |
+      ${{ runner.os }}-${{ matrix.arch }}-
+```
+
+`actions/cache@v4` 的 path 要覆盖包管理器缓存和构建缓存, 不缓存发布产物; key 包含 runner 系统, 矩阵架构和 lockfile hash; restore-keys 用于 key 变化时的回退. 缓存 miss 或恢复失败不能导致构建失败, 干净环境必须能完整构建. 不同平台和架构的缓存必须隔离, 不要对同一路径同时配置专用缓存和通用缓存. 没有 lockfile 时使用稳定的依赖清单 hash 或跳过缓存, 不要只按分支名生成 key.
 
 ## 平台与架构
 
