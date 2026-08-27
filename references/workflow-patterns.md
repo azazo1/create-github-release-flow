@@ -49,7 +49,7 @@ concurrency:
 
 ## CI, tag 与手动条件
 
-先解析统一的 release context, 再让 branch 和 PR 完成矩阵构建, 只让 tag push 或带 tag input 的手动触发执行发布步骤:
+先解析统一的 release context, 再让 branch, PR, tag 和手动触发都完成矩阵构建, 打包并上传 artifact. 只让 tag push 或带 tag input 的手动触发执行发布步骤:
 
 ```yaml
 jobs:
@@ -120,11 +120,9 @@ jobs:
         run: PROJECT_BUILD_COMMAND
 
       - name: 打包构建产物
-        if: ${{ github.event_name == 'workflow_dispatch' || needs.version.outputs.is_release == 'true' }}
         run: PROJECT_PACKAGE_COMMAND
 
       - name: 上传构建产物
-        if: ${{ github.event_name == 'workflow_dispatch' || needs.version.outputs.is_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: PROJECT-${{ matrix.platform }}-${{ matrix.arch }}
@@ -146,7 +144,7 @@ jobs:
           fetch-depth: 0
 ```
 
-没有 tag 时 `version` job 可以成功完成但不产生 version output. 只在 `is_release` 条件的步骤和 job 中消费该 output. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout.
+没有 tag 时 `version` job 可以成功完成但不产生 version output. 只在 `is_release` 条件的步骤和 job 中消费该 output. 打包和 artifact 上传不要再加 `is_release` 或 `workflow_dispatch` 条件, 非 release 产物用自动生成的构建版本号命名. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout.
 
 ## 依赖与构建缓存
 
@@ -232,7 +230,6 @@ Unix runner 示例:
 
 ```yaml
 - name: 校验 Unix 二进制文件
-  if: ${{ github.event_name == 'workflow_dispatch' || needs.version.outputs.is_release == 'true' }}
   shell: bash
   run: |
     set -euo pipefail
@@ -245,7 +242,6 @@ Windows runner 示例:
 
 ```yaml
 - name: 校验 Windows 二进制文件
-  if: ${{ github.event_name == 'workflow_dispatch' || needs.version.outputs.is_release == 'true' }}
   shell: pwsh
   run: |
     $binary = "target/TARGET/release/PROJECT.exe"

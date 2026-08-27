@@ -11,13 +11,13 @@ description: 创建或修改 GitHub Actions 跨平台 CI 和 tag 发布流程. �
 
 ```text
 release preparation -> write VERSION.md -> commit -> annotated tag from VERSION.md -> push
-branch/PR -> build matrix
+branch/PR -> build matrix -> validate/package -> upload artifact
 tag -> validate version -> build matrix -> validate/package -> notes/checksums -> create/update release
-manual branch -> build matrix
+manual branch -> build matrix -> validate/package -> upload artifact
 manual tag -> validate version -> build matrix -> validate/package -> notes/checksums -> create/update release
 ```
 
-默认让普通 CI, tag 发布和手动触发复用同一套构建矩阵. 普通 branch 和 PR 只构建. Tag push 或显式指定已有 tag 的手动触发执行版本校验和发布. 如果仓库已有独立发布 workflow, 可以保留分离结构, 但不要复制构建逻辑.
+默认让普通 CI, tag 发布和手动触发复用同一套构建矩阵. 普通 branch, PR 和未填写 tag 的手动触发构建并上传 Actions artifact, 但不创建 release. Tag push 或显式指定已有 tag 的手动触发执行版本校验和发布. 如果仓库已有独立发布 workflow, 可以保留分离结构, 但不要复制构建逻辑.
 
 构建, 校验或产物完整性检查失败时不得创建公开 release.
 
@@ -90,7 +90,8 @@ dist:
 - `version` job 保持可被构建 job 依赖, 但版本校验步骤只在 `is_release` 为 `true` 时执行.
 - 构建 job 使用 `source_ref` 检出代码, 确保手动发布构建的是目标 tag.
 - 构建矩阵在 branch, PR, tag 和手动触发上执行.
-- 产物校验, 打包和 artifact 上传步骤在 `is_release` 为 `true` 或事件为 `workflow_dispatch` 时执行.
+- 产物校验, 打包和 artifact 上传步骤默认在上述全部触发上执行, 不要只在 release 或 `workflow_dispatch` 时才上传.
+- 非 release 运行没有校验后的 `version` output, 产物命名改用自动生成的构建版本号.
 - release job 只在 `is_release` 为 `true` 时执行, 并依赖版本校验和全部矩阵构建.
 
 为每个 ref 或手动输入 tag 设置 concurrency group, 并使用 `cancel-in-progress: false`, 防止同一 tag 的 push 和手动发布并发修改 release.
@@ -136,9 +137,9 @@ dist:
 PROJECT-VERSION-PLATFORM-ARCH.EXT
 ```
 
-例如 `project-1.2.3-linux-x86_64.tar.gz`, `project-1.2.3-windows-aarch64.zip` 和 `project-1.2.3-macos-aarch64.dmg`.
+例如 `project-1.2.3-linux-x86_64.tar.gz`, `project-1.2.3-windows-aarch64.zip` 和 `project-1.2.3-macos-aarch64.dmg`. 非 release 运行使用自动生成的构建版本号, 例如 `project-1.2.3-a1b2c3d-linux-x86_64.tar.gz`.
 
-构建 job 为每个矩阵项上传一个独立 artifact, 缺少文件时直接失败. 发布专用 artifact 可以设置较短 retention. Release job 下载并合并全部 artifact, 只对预期扩展名生成统一的 `SHA256SUMS`.
+构建 job 为每个矩阵项上传一个独立 artifact, 缺少文件时直接失败. 该步骤不限于 tag 或手动触发. 发布专用 artifact 可以设置较短 retention. Release job 下载并合并全部 artifact, 只对预期扩展名生成统一的 `SHA256SUMS`. SHA256SUMS 和 GitHub Release 只在 `is_release` 为 `true` 时生成.
 
 在生成校验和前显式统计归档数量. 在上传 release 前再次统计归档和 `SHA256SUMS` 的总数量. 数量必须与矩阵一致, 防止 glob 静默漏传或混入旧文件.
 
@@ -242,10 +243,10 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 ### 6. 验证
 
 1. 使用 YAML parser 和项目已有的 action linter 检查 workflow.
-2. 确认 branch, PR 和未填写 tag 的手动触发符合第 2 节定义的构建与发布条件.
+2. 确认 branch, PR 和未填写 tag 的手动触发会构建并上传 artifact, 但不会创建 release.
 3. 模拟合法与非法 tag, 确认版本校验和 metadata 读取正确.
 4. 在干净环境运行构建, 平台校验和打包命令.
-5. 确认全部平台与架构组合都有 tag 专用的校验, 打包和 artifact 上传步骤.
+5. 确认全部平台与架构组合在 branch, PR, tag 和手动触发上都有校验, 打包和 artifact 上传步骤, 且仅 tag 发布会创建 release.
 6. 确认 release job 等待全部构建成功, 严格检查产物数量并生成 `SHA256SUMS`.
 7. 确认版本化 notes 在创建 tag 前已提交, 遵循 release notes 模板, `git tag -F` 使用 `--cleanup=verbatim`, annotation 保留 Markdown 标题并与文件一致.
 8. 确认 checkout 后会精确 refetch 目标 tag object, lightweight tag, 空 annotation 和内容不一致都会失败.
