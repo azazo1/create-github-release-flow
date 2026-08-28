@@ -1,4 +1,4 @@
 interface:
   display_name: "GitHub Release Flow"
-  short_description: "跨平台 GitHub tag 自动发布工作流"
-  default_prompt: "使用 $create-github-release-flow 为当前项目创建可靠的跨平台 tag release 工作流, 并让 branch, PR 和未填写 tag 的手动运行上传 artifact 而不创建 release."
+  short_description: "GitHub tag 自动发布工作流"
+  default_prompt: "使用 $create-github-release-flow 为当前项目创建可靠的 tag release 工作流. 先判断是库分发还是二进制/应用分发, 再按对应规则实现 CI 与发布."

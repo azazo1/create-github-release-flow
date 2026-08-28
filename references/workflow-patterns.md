@@ -15,6 +15,7 @@
   - [发布说明与 annotated tag](#发布说明与-annotated-tag)
   - [校验和与数量检查](#校验和与数量检查)
   - [创建或更新 release](#创建或更新-release)
+  - [库分发的 notes-only release](#库分发的-notes-only-release)
 
 示例中的 action major version 和 runner 标签只是结构的一部分. 使用前确认当前稳定版本, runner 可用性和项目的 action pinning 策略.
 
@@ -33,7 +34,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "要发布的已有 tag, 留空时只构建并上传 artifact"
+        description: "要发布的已有 tag, 留空时不创建 release"
         required: false
         type: string
 
@@ -49,7 +50,7 @@ concurrency:
 
 ## CI, tag 与手动条件
 
-先解析统一的 release context, 再让 branch, PR, tag 和手动触发都完成矩阵构建, 打包并上传 artifact. 只让 tag push 或带 tag input 的手动触发执行发布步骤:
+先解析统一的 release context, 再让 branch, PR, tag 和手动触发都完成矩阵检查. 二进制/应用还要打包并上传 artifact. 只让 tag push 或带 tag input 的手动触发执行发布步骤:
 
 ```yaml
 jobs:
@@ -144,11 +145,11 @@ jobs:
           fetch-depth: 0
 ```
 
-没有 tag 时 `version` job 可以成功完成但不产生 version output. 只在 `is_release` 条件的步骤和 job 中消费该 output. 打包和 artifact 上传不要再加 `is_release` 或 `workflow_dispatch` 条件, 非 release 产物用自动生成的构建版本号命名. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout.
+没有 tag 时 `version` job 可以成功完成但不产生 version output. 只在 `is_release` 条件的步骤和 job 中消费该 output. 二进制/应用的打包和 artifact 上传不要再加 `is_release` 或 `workflow_dispatch` 条件, 非 release 产物用自动生成的构建版本号命名. 库分发省略打包, artifact 上传和 SHA256SUMS 步骤, 矩阵按测试需求覆盖. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout.
 
 ## 依赖与构建缓存
 
-构建 job 应配置依赖与构建缓存, 但缓存只用于加速, 不能作为发布正确性来源. 优先使用该语言或工具链已验证的专用缓存机制, 没有可用专用机制时才回退到通用缓存.
+构建或测试 job 应配置依赖与构建缓存, 但缓存只用于加速, 不能作为发布正确性来源. 优先使用该语言或工具链已验证的专用缓存机制, 没有可用专用机制时才回退到通用缓存.
 
 常用优先方案:
 
@@ -177,6 +178,8 @@ jobs:
 `actions/cache@v4` 的 path 要覆盖包管理器缓存和构建缓存, 不缓存发布产物; key 包含 runner 系统, 矩阵架构和 lockfile hash; restore-keys 用于 key 变化时的回退. 缓存 miss 或恢复失败不能导致构建失败, 干净环境必须能完整构建. 不同平台和架构的缓存必须隔离, 不要对同一路径同时配置专用缓存和通用缓存. 没有 lockfile 时使用稳定的依赖清单 hash 或跳过缓存, 不要只按分支名生成 key.
 
 ## 平台与架构
+
+仅二进制/应用分发需要此归档矩阵. 库分发按项目现有测试需求覆盖平台, 不要为了发布归档去扩矩阵.
 
 在使用前查阅 GitHub hosted runner 官方文档, 不要仅依赖此表. 常见原生 64 位目标如下:
 
@@ -224,7 +227,7 @@ jobs:
 
 ## 平台产物校验
 
-GUI 程序不适合通过 `--version` 启动时, 检查文件格式和必要路径.
+仅二进制/应用分发需要本节. GUI 程序不适合通过 `--version` 启动时, 检查文件格式和必要路径.
 
 Unix runner 示例:
 
@@ -353,6 +356,8 @@ Release job 按 `source_ref` 完整 checkout tags 后, 精确 refetch 远端 tag
 
 ## 校验和与数量检查
 
+仅二进制/应用分发需要本节. 库分发的 notes-only release 跳过归档计数和 SHA256SUMS.
+
 从空目录汇总归档, 并显式校验矩阵产物数量:
 
 ```yaml
@@ -376,7 +381,7 @@ Release job 按 `source_ref` 完整 checkout tags 后, 精确 refetch 远端 tag
 
 ## 创建或更新 release
 
-重跑时更新已存在的 release 并覆盖产物:
+仅二进制/应用分发需要上传归档. 重跑时更新已存在的 release 并覆盖产物:
 
 ```yaml
 - name: 创建或更新 GitHub Release
@@ -422,3 +427,39 @@ Release job 按 `source_ref` 完整 checkout tags 后, 精确 refetch 远端 tag
 ```
 
 在执行前将 `EXPECTED_ARCHIVE_COUNT` 和 `EXPECTED_ASSET_COUNT` 替换为矩阵对应的确定值, 不要保留未展开的占位符.
+
+## 库分发的 notes-only release
+
+库分发不上传归档或 SHA256SUMS. `gh release create` 不带资产; 已存在时只用 `gh release edit` 更新标题和正文:
+
+```yaml
+- name: 创建或更新 GitHub Release
+  env:
+    GH_TOKEN: ${{ github.token }}
+    TAG_NAME: ${{ needs.version.outputs.tag_name }}
+    VERSION: ${{ needs.version.outputs.version }}
+  shell: bash
+  run: |
+    set -euo pipefail
+
+    prerelease_args=()
+    if [[ "$VERSION" == *-* ]]; then
+      prerelease_args+=(--prerelease)
+    fi
+
+    if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+      gh release edit "$TAG_NAME" \
+        --verify-tag \
+        --title "PROJECT v$VERSION" \
+        --notes-file release-notes.md \
+        "${prerelease_args[@]}"
+    else
+      gh release create "$TAG_NAME" \
+        --verify-tag \
+        --title "PROJECT v$VERSION" \
+        --notes-file release-notes.md \
+        "${prerelease_args[@]}"
+    fi
+```
+
+不要为了形式上传空的 `SHA256SUMS`. 版本校验, annotated tag 比较和 generated notes 仍按前文步骤执行.

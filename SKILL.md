@@ -1,13 +1,15 @@
 ---
 name: create-github-release-flow
-description: 创建或修改 GitHub Actions 跨平台 CI 和 tag 发布流程. 适用于仓库需要版本校验, 手动发布, release notes, 多平台产物打包或 GitHub Release 自动发布时. 打 tag push 必读.
+description: 创建或修改 GitHub Actions CI 和 tag 发布流程. 适用于仓库需要版本校验, 手动发布, release notes, 多平台产物打包或 GitHub Release 自动发布时. 打 tag push 必读.
 ---
 
 # 创建 GitHub Release 流
 
 ## 目标
 
-先确认项目现有的 CI, 构建, 打包和版本规则, 再实现以下流程:
+先确认项目现有的 CI, 构建, 打包和版本规则, 并判断分发方式, 再实现以下流程.
+
+二进制/应用:
 
 ```text
 release preparation -> write VERSION.md -> commit -> annotated tag from VERSION.md -> push
@@ -17,26 +19,41 @@ manual branch -> build matrix -> validate/package -> upload artifact
 manual tag -> validate version -> build matrix -> validate/package -> notes/checksums -> create/update release
 ```
 
-默认让普通 CI, tag 发布和手动触发复用同一套构建矩阵. 普通 branch, PR 和未填写 tag 的手动触发构建并上传 Actions artifact, 但不创建 release. Tag push 或显式指定已有 tag 的手动触发执行版本校验和发布. 如果仓库已有独立发布 workflow, 可以保留分离结构, 但不要复制构建逻辑.
+库分发 (Rust lib crate, 以及 Python package, npm package, Go module 等同类形式):
 
-构建, 校验或产物完整性检查失败时不得创建公开 release.
+```text
+release preparation -> write VERSION.md -> commit -> annotated tag from VERSION.md -> push
+branch/PR -> test/build
+tag -> validate version -> test/build -> notes -> create/update release
+manual branch -> test/build
+manual tag -> validate version -> test/build -> notes -> create/update release
+```
+
+默认让普通 CI, tag 发布和手动触发复用同一套检查. 普通 branch, PR 和未填写 tag 的手动触发不创建 release. Tag push 或显式指定已有 tag 的手动触发执行版本校验和发布. 如果仓库已有独立发布 workflow, 可以保留分离结构, 但不要复制构建逻辑.
+
+构建, 校验或 (若有) 产物完整性检查失败时不得创建公开 release.
 
 ## 工作流程
 
 ### 1. 确认项目规则
 
+先判断项目如何分发, 再读现有 CI 和脚本:
+
+- 二进制/应用: 用户从 GitHub Release 或安装包获取 CLI, TUI, GUI 或预编译归档. 使用下文的运行时版本号显示, 跨平台打包和 artifact 规则.
+- 库: 用户通过语言生态的包管理器获取, 例如 Rust lib crate, Python package, npm package, Go module. 不套用运行时版本号显示规则, 也不默认做跨平台二进制打包.
+- 混合项目只对实际以二进制方式分发的部分套用版本显示和打包规则. 判断以用户获取方式为准, 不要只看构建清单里有没有 bin 或 lib target.
+
 阅读项目说明, 现有 CI, task runner 和打包脚本, 确认:
 
 - tag 格式和版本来源.
-- 正式构建命令与 lockfile.
+- 正式构建或测试命令与 lockfile.
 - 项目当前或可用的依赖与构建缓存机制, 包括专用缓存 action 和缓存路径.
 - branch, PR 和 tag 当前执行的 job.
-- 二进制, 应用包和归档的输出路径.
-- 各平台的编译 target, runner 和运行时兼容要求.
 - release notes, changelog 和历史 release 的维护方式.
-- CLI, TUI, GUI 等展示版本号的交互位置及其版本信息的生成方式.
+- 二进制/应用: 二进制, 应用包和归档的输出路径; 各平台的编译 target, runner 和运行时兼容要求; CLI, TUI, GUI 等展示版本号的交互位置及其版本信息的生成方式.
+- 库: 包 metadata 中的版本字段, 现有测试矩阵, 以及是否已有 crates.io, PyPI, npm 等发布方式.
 
-CLI, TUI, GUI 等可能展示版本号的交互位置 (如 `--version`, About 对话框) 必须显示当前构建版本并标注构建 commit:
+仅当项目以二进制/应用方式分发, 且 CLI, TUI, GUI 等可能展示版本号时, 这些交互位置 (如 `--version`, About 对话框) 必须显示当前构建版本并标注构建 commit:
 
 - 构建 commit 恰好是某个版本 tag 时, 直接显示该 tag, 例如 `v1.2.3`.
 - 构建处于非 tag commit 时, 在最近一个版本 tag 后追加 `-` 和 7 位短 hash, 例如 `v1.2.3-a1b2c3d`.
@@ -44,12 +61,13 @@ CLI, TUI, GUI 等可能展示版本号的交互位置 (如 `--version`, About �
 - 基础版本号样式跟随最近一个版本 tag, 不要固定假设带 `v` 前缀或三段式 SemVer.
 
 > 版本号显示必须自动生成, 而不是手动编辑写死.
+> 库分发不要把 git describe 或短 hash 写入包版本. 包版本保持 metadata 中的稳定版本, 由 tag 与其严格对齐.
 
 优先调用项目已有的 task runner 或打包脚本. 平台专用打包包含应用目录, 图标, metadata 或签名准备时, 将逻辑放在项目脚本中, 不要把完整实现内联到 workflow.
 
-在项目需要新增 Just recipe 时, 统一提供 `just dist`. 该 recipe 根据当前运行平台执行相应构建, 必须不接受任何参数, 不要声明 `*args` 或位置参数, 也不要新增 `package-macos`, `package-windows` 等按平台命名的 recipe.
+仅在项目需要平台二进制打包, 并且需要新增 Just recipe 时, 统一提供 `just dist`. 该 recipe 根据当前运行平台执行相应构建, 必须不接受任何参数, 不要声明 `*args` 或位置参数, 也不要新增 `package-macos`, `package-windows` 等按平台命名的 recipe. 库分发不要为了走发布流程而新增 `just dist`.
 
-例如, 为同一 `dist` recipe 添加互斥的平台属性:
+二进制/应用示例, 为同一 `dist` recipe 添加互斥的平台属性:
 
 ```justfile
 # 根据当前平台生成发布产物.
@@ -74,7 +92,7 @@ dist:
 
 如果项目文件中保存版本号, 使用结构化 metadata 命令读取, 规范化 tag 后严格比较. Rust 项目优先使用 `cargo metadata --locked --no-deps --format-version 1`, 不要用文本正则读取 `Cargo.toml`. 如果 tag 是唯一版本来源, 不要额外维护第二份版本状态.
 
-添加 `workflow_dispatch` 和可选字符串 input `tag`. 空值表示对用户在 GitHub UI 或 API 中选择的 ref 运行构建并上传 Actions artifact, 但不创建 release. 非空值表示发布该已有 tag. 不要让手动发布隐式使用触发 workflow 的 branch commit.
+添加 `workflow_dispatch` 和可选字符串 input `tag`. 空值表示对用户在 GitHub UI 或 API 中选择的 ref 运行 CI, 不创建 release; 二进制/应用会构建并上传 Actions artifact, 库分发默认只跑测试或编译检查, 不要为了形式上传空 artifact. 非空值表示发布该已有 tag. 不要让手动发布隐式使用触发 workflow 的 branch commit.
 
 在 `version` job 的第一个步骤统一解析并输出:
 
@@ -87,18 +105,34 @@ dist:
 
 当普通 CI 和发布共用 workflow 时:
 
-- `version` job 保持可被构建 job 依赖, 但版本校验步骤只在 `is_release` 为 `true` 时执行.
-- 构建 job 使用 `source_ref` 检出代码, 确保手动发布构建的是目标 tag.
-- 构建矩阵在 branch, PR, tag 和手动触发上执行.
-- 产物校验, 打包和 artifact 上传步骤默认在上述全部触发上执行, 不要只在 release 或 `workflow_dispatch` 时才上传.
-- 非 release 运行没有校验后的 `version` output, 产物命名改用自动生成的构建版本号.
-- release job 只在 `is_release` 为 `true` 时执行, 并依赖版本校验和全部矩阵构建.
+- `version` job 保持可被构建或测试 job 依赖, 但版本校验步骤只在 `is_release` 为 `true` 时执行.
+- 构建或测试 job 使用 `source_ref` 检出代码, 确保手动发布构建的是目标 tag.
+- 矩阵在 branch, PR, tag 和手动触发上执行.
+- 二进制/应用: 产物校验, 打包和 artifact 上传步骤默认在上述全部触发上执行, 不要只在 release 或 `workflow_dispatch` 时才上传. 非 release 运行没有校验后的 `version` output, 产物命名改用自动生成的构建版本号.
+- 库分发: 矩阵按项目测试需求覆盖平台, 不要为了归档去扩 6 架构打包矩阵; 默认不打包二进制, 不上传发布归档.
+- release job 只在 `is_release` 为 `true` 时执行, 并依赖版本校验和全部矩阵检查.
 
 为每个 ref 或手动输入 tag 设置 concurrency group, 并使用 `cancel-in-progress: false`, 防止同一 tag 的 push 和手动发布并发修改 release.
 
 ### 3. 构建, 校验并打包
 
-默认覆盖以下构建矩阵:
+构建或测试 job 应配置依赖与构建缓存, 但缓存只用于加速, 不能作为发布正确性来源:
+
+- 优先使用该语言或工具链已验证的专用缓存 action, 例如 setup action 内置缓存或社区广泛使用的专用 cache action.
+- 没有可用专用机制时, 回退到 `actions/cache@v4`, 缓存路径覆盖包管理器缓存和构建缓存, 不缓存发布产物.
+- `actions/cache@v4` 的 key 包含 runner 系统, 矩阵架构和 lockfile hash, 并使用 `restore-keys` 回退; 不同平台和架构必须隔离.
+- 缓存 miss 或恢复失败不能导致构建失败, 干净环境必须能完整构建.
+- 二进制/应用: 最终产物必须通过 artifact 汇总, 不依赖缓存保存发布文件.
+
+库分发:
+
+- 不要求 `--version` smoke test.
+- CI 以测试, 类型检查和正式构建命令为主, 平台覆盖跟随项目现有测试需求.
+- 不要新增跨平台二进制归档, 不要上传发布用 artifact, 不要生成 SHA256SUMS.
+- 不要把自动生成的构建版本号写入 Cargo.toml, pyproject.toml, package.json 等包版本字段.
+- 若项目已有发布到 crates.io, PyPI, npm 等的脚本或 recipe, 优先复用; 不要在高权限 release job 里内联一套新的发布实现, 也不要为了 GitHub Release 再打一份库归档.
+
+跨平台归档矩阵, 产物命名, SHA256SUMS 和 `just dist` 只适用于二进制/应用. 默认覆盖以下构建矩阵:
 
 | 平台 | 架构 | 常见归档 |
 | --- | --- | --- |
@@ -112,14 +146,6 @@ dist:
 在实现时查阅 GitHub 官方 runner 文档, 确认当前可用的 runner 标签和仓库资格. 优先使用对应系统和架构的原生 runner. 无法原生构建时使用项目成熟的交叉编译工具链, 并明确 linker, sysroot 和系统库要求.
 
 > 注: 不要使用已经退役的 runner, 比如 macos-13-intel 等.
-
-构建 job 应配置依赖与构建缓存, 但缓存只用于加速, 不能作为发布正确性来源:
-
-- 优先使用该语言或工具链已验证的专用缓存 action, 例如 setup action 内置缓存或社区广泛使用的专用 cache action.
-- 没有可用专用机制时, 回退到 `actions/cache@v4`, 缓存路径覆盖包管理器缓存和构建缓存, 不缓存发布产物.
-- `actions/cache@v4` 的 key 包含 runner 系统, 矩阵架构和 lockfile hash, 并使用 `restore-keys` 回退; 不同平台和架构必须隔离.
-- 缓存 miss 或恢复失败不能导致构建失败, 干净环境必须能完整构建.
-- 最终产物必须通过 artifact 汇总, 不依赖缓存保存发布文件.
 
 每个平台使用正式构建命令和 lockfile. 在归档前选择适合产物类型的最小校验:
 
@@ -160,7 +186,7 @@ git tag -a "v0.1.0" --cleanup=verbatim \
 
 必须使用 `--cleanup=verbatim`. Git 默认的 `strip` 模式会把 Markdown 中以 `#` 开头的标题当作注释移除. 不要再用 `-m` 单独维护另一份 tag 正文. 如果 tag 已存在或已推送, 不要直接覆盖, 应先报告 annotation 与版本文件不一致.
 
-人工说明需要覆盖用户可见变化, 兼容性影响和升级操作. 只记录相对上一个发布版本形成净变化的用户可见内容. 如果某个改动在区间内被加入后又移除, 且当前版本相对上一个发布版本没有任何可观察差异, 则该改动完全透明, changelog 不需要体现. 文件缺失或为空时发布直接失败. 使用以下模板, 只保留实际有内容的 section:
+人工说明需要覆盖用户可见变化, 兼容性影响和升级操作. 只记录相对上一个发布版本形成净变化的用户可见内容. 库分发侧重 API, 兼容性和迁移; 没有安装包时, Upgrade Notes 写依赖版本和 API 迁移即可, 不要按二进制安装包的口吻写升级步骤. 如果某个改动在区间内被加入后又移除, 且当前版本相对上一个发布版本没有任何可观察差异, 则该改动完全透明, changelog 不需要体现. 文件缺失或为空时发布直接失败. 使用以下模板, 只保留实际有内容的 section:
 
 ```markdown
 # PROJECT vVERSION
@@ -226,35 +252,35 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 
 ### 5. 创建或更新 release
 
-所有矩阵构建成功后, 使用 runner 自带的 `gh` CLI 发布. 只给 release job 设置 `contents: write`.
+矩阵检查成功后, 使用 runner 自带的 `gh` CLI 发布. 只给 release job 设置 `contents: write`.
 
 创建或更新 release 时:
 
 - 使用 `--verify-tag` 确认 tag 已存在.
 - 标题统一为 `PROJECT vVERSION`, 先移除版本中的可选 `v` 前缀.
 - SemVer 包含预发布后缀时设置 prerelease.
-- 找不到预期产物或校验和时直接失败.
-- release 不存在时使用 `gh release create`.
-- release 已存在时使用 `gh release edit` 更新标题和正文, 再用 `gh release upload --clobber` 覆盖产物.
-- 需要提前创建 release 时先设为 draft, 产物完整后再公开.
+- 二进制/应用: 找不到预期产物或校验和时直接失败. release 不存在时使用 `gh release create`. release 已存在时使用 `gh release edit` 更新标题和正文, 再用 `gh release upload --clobber` 覆盖产物. 需要提前创建 release 时先设为 draft, 产物完整后再公开.
+- 库分发: 创建或更新 notes-only GitHub Release, 不要因为没有归档或 SHA256SUMS 而失败, 也不要上传空的 SHA256SUMS. release 不存在时 `gh release create` 不带资产; 已存在时只用 `gh release edit` 更新标题和正文.
 
 支持更新已有 release, 使失败后的重跑可以收敛到完整状态, 而不是因为 release 已存在再次失败.
 
 ### 6. 验证
 
+按分发类型核对应检查项. 库分发跳过产物, checksum 和运行时版本显示相关项.
+
 1. 使用 YAML parser 和项目已有的 action linter 检查 workflow.
-2. 确认 branch, PR 和未填写 tag 的手动触发会构建并上传 artifact, 但不会创建 release.
+2. 确认 branch, PR 和未填写 tag 的手动触发不会创建 release. 二进制/应用会构建并上传 artifact; 库分发会跑测试或编译检查, 且没有为形式而上传的空 artifact.
 3. 模拟合法与非法 tag, 确认版本校验和 metadata 读取正确.
-4. 在干净环境运行构建, 平台校验和打包命令.
-5. 确认全部平台与架构组合在 branch, PR, tag 和手动触发上都有校验, 打包和 artifact 上传步骤, 且仅 tag 发布会创建 release.
-6. 确认 release job 等待全部构建成功, 严格检查产物数量并生成 `SHA256SUMS`.
+4. 在干净环境运行正式检查命令. 二进制/应用还要跑平台校验和打包命令.
+5. 二进制/应用: 确认全部平台与架构组合在 branch, PR, tag 和手动触发上都有校验, 打包和 artifact 上传步骤, 且仅 tag 发布会创建 release. 库分发: 确认测试矩阵覆盖项目现有需求, 且仅 tag 发布会创建 release.
+6. 二进制/应用: 确认 release job 等待全部构建成功, 严格检查产物数量并生成 `SHA256SUMS`. 库分发: 确认 release job 等待全部检查成功, 且不会因缺少归档失败.
 7. 确认版本化 notes 在创建 tag 前已提交, 遵循 release notes 模板, `git tag -F` 使用 `--cleanup=verbatim`, annotation 保留 Markdown 标题并与文件一致.
 8. 确认 checkout 后会精确 refetch 目标 tag object, lightweight tag, 空 annotation 和内容不一致都会失败.
 9. 检查可选 base tag 会被校验, generated notes 会用 `---` 分隔并追加在人工正文之后.
-10. 检查标题, prerelease 状态, 产物命名和权限范围.
+10. 检查标题, prerelease 状态和权限范围. 二进制/应用还要检查产物命名; 库分发确认没有多余归档资产.
 11. 手动填写已有 tag 时确认所有 job 检出该 tag, 且 notes 和 generated notes 都使用该 tag.
-12. 检查 release 首次运行会创建, push 与手动重跑会更新正文并覆盖现有产物.
-13. 在精确 tag, 非 tag commit 和脏 HEAD 三种状态下, 检查 CLI/TUI/GUI 的版本显示符合约定.
+12. 检查 release 首次运行会创建, push 与手动重跑会更新正文. 二进制/应用还会覆盖现有产物.
+13. 仅二进制/应用: 在精确 tag, 非 tag commit 和脏 HEAD 三种状态下, 检查 CLI/TUI/GUI 的版本显示符合约定. 库分发确认包版本仍是 metadata 中的稳定版本, 没有被写入 git hash.
 14. 确认缓存机制选择顺序正确, 专用缓存与项目实际匹配, 没有重复缓存同一路径, 且 fallback 缓存 miss 时仍能完整构建.
 
 本地检查不能证明所有 GitHub hosted runner 均可用. 明确说明仍需通过真实 tag run 验证的 runner 资格, 平台依赖和发布权限.
@@ -267,5 +293,5 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 - PowerShell 步骤使用 `-LiteralPath` 并在缺少文件时抛出错误.
 - 多行正文通过文件传递, 不要写入普通单行环境变量.
 - 不要在高权限 release job 中构建或执行不可信代码.
-- 依赖和构建缓存只配置在低权限构建 job, 不要在高权限 release job 中恢复或写入缓存.
+- 依赖和构建缓存只配置在低权限构建或测试 job, 不要在高权限 release job 中恢复或写入缓存.
 - 不要假设 `*-latest` 的 CPU 架构, 应根据官方 runner 文档显式选择.
