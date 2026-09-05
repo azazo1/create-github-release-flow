@@ -259,6 +259,24 @@ Windows runner 示例:
 
 Linux 的 `EXPECTED_FORMAT` 使用 `ELF`, macOS 使用 `Mach-O`. 还需要检查应用包结构时, 在平台打包脚本返回后追加路径断言.
 
+桌面应用产出的 macOS dmg 必须包含指向 `/Applications` 的符号链接, 例如 `Applications` -> `/Applications`, 让用户能直接把 `.app` 拖进该目录完成安装. dmg 需同时包含应用的 `.app` 包. 下面是在打包脚本返回后, 挂载 dmg 校验这两个路径的示例:
+
+```yaml
+- name: 校验 dmg 包含 Applications 替身与应用包
+  shell: bash
+  run: |
+    set -euo pipefail
+    dmg="release-artifacts/PROJECT.dmg"
+    mount_point="$(mktemp -d)"
+    hdiutil attach -nobrowse -readonly -mountpoint "$mount_point" "$dmg"
+    trap 'hdiutil detach "$mount_point" >/dev/null 2>&1 || true' EXIT
+
+    test -L "$mount_point/Applications"
+    test -d "$mount_point/PROJECT.app"
+```
+
+`readlink "$mount_point/Applications"` 应解析到 `/Applications`. 如果项目打包脚本使用别名替身而不是符号链接 (例如 `ln -s` 之外的 alias 方式), 调整对应断言, 但必须确保该目录确实指向 `/Applications`.
+
 ## 发布说明与 annotated tag
 
 将 `docs/changelog/VERSION.md` 作为人工发布说明的唯一来源. 先提交版本号和说明文件, 再让 annotated tag 指向该 commit. 使用说明文件直接创建 tag:

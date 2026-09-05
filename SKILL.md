@@ -153,6 +153,7 @@ dist:
 - CLI 的 `--version` 输出需符合版本显示约定.
 - 不适合在 CI 中启动的 GUI 或服务程序, 检查目标文件存在, 可执行权限和 ELF, PE 或 Mach-O 文件格式.
 - 应用包或安装镜像检查目录结构, 主程序和必要资源.
+- macOS 桌面应用 dmg 必须包含指向 `/Applications` 的符号链接和应用的 `.app` 包, 校验方式见 [workflow-patterns.md](references/workflow-patterns.md#平台产物校验).
 - 无法直接运行的交叉编译产物使用模拟器, 加载检查或文件格式检查.
 
 不要为了形式统一而强行执行会启动 GUI, 后台服务或交互流程的二进制.
