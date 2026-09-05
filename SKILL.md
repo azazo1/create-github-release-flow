@@ -100,6 +100,7 @@ dist:
 - `tag_name`: tag push 的 ref name 或手动输入的 tag.
 - `source_ref`: tag 发布时为 `refs/tags/TAG`, 其他情况为当前事件的 `github.sha`.
 - `version`: 仅在 `is_release` 为 `true` 且版本校验成功后输出.
+- `build_version`: 二进制/应用必须始终输出. release 时等于 `version`; 非 release 时为最近版本号加 `-` 和 7 位短 hash, 例如 `1.2.3-a1b2c3d`. 库分发不需要这个 output.
 
 手动 tag 先用 `git check-ref-format "refs/tags/$TAG_NAME"` 校验格式, 再检出完整 tag. Tag 不存在时必须在构建开始前失败.
 
@@ -108,7 +109,7 @@ dist:
 - `version` job 保持可被构建或测试 job 依赖, 但版本校验步骤只在 `is_release` 为 `true` 时执行.
 - 构建或测试 job 使用 `source_ref` 检出代码, 确保手动发布构建的是目标 tag.
 - 矩阵在 branch, PR, tag 和手动触发上执行.
-- 二进制/应用: 产物校验, 打包和 artifact 上传步骤默认在上述全部触发上执行, 不要只在 release 或 `workflow_dispatch` 时才上传. 非 release 运行没有校验后的 `version` output, 产物命名改用自动生成的构建版本号.
+- 二进制/应用: 产物校验, 打包和 artifact 上传步骤默认在上述全部触发上执行, 不要只在 release 或 `workflow_dispatch` 时才上传. 非 release 运行没有校验后的 `version` output, 产物命名改用 `build_version`.
 - 库分发: 矩阵按项目测试需求覆盖平台, 不要为了归档去扩 6 架构打包矩阵; 默认不打包二进制, 不上传发布归档.
 - release job 只在 `is_release` 为 `true` 时执行, 并依赖版本校验和全部矩阵检查.
 
@@ -164,7 +165,7 @@ dist:
 PROJECT-VERSION-PLATFORM-ARCH.EXT
 ```
 
-例如 `project-1.2.3-linux-x86_64.tar.gz`, `project-1.2.3-windows-aarch64.zip` 和 `project-1.2.3-macos-aarch64.dmg`. 非 release 运行使用自动生成的构建版本号, 例如 `project-1.2.3-a1b2c3d-linux-x86_64.tar.gz`.
+例如 `project-1.2.3-linux-x86_64.tar.gz`, `project-1.2.3-windows-aarch64.zip` 和 `project-1.2.3-macos-aarch64.dmg`. 非 release 运行使用 `build_version`, 例如 `project-1.2.3-a1b2c3d-linux-x86_64.tar.gz`. Actions artifact 名使用同一格式但不带扩展名, 例如 `project-1.2.3-a1b2c3d-linux-x86_64`, 不要写成 `project-aarch64`.
 
 构建 job 为每个矩阵项上传一个独立 artifact, 缺少文件时直接失败. 该步骤不限于 tag 或手动触发. 发布专用 artifact 可以设置较短 retention. Release job 下载并合并全部 artifact, 只对预期扩展名生成统一的 `SHA256SUMS`. SHA256SUMS 和 GitHub Release 只在 `is_release` 为 `true` 时生成.
 
@@ -278,7 +279,7 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 7. 确认版本化 notes 在创建 tag 前已提交, 遵循 release notes 模板, `git tag -F` 使用 `--cleanup=verbatim`, annotation 保留 Markdown 标题并与文件一致.
 8. 确认 checkout 后会精确 refetch 目标 tag object, lightweight tag, 空 annotation 和内容不一致都会失败.
 9. 检查可选 base tag 会被校验, generated notes 会用 `---` 分隔并追加在人工正文之后.
-10. 检查标题, prerelease 状态和权限范围. 二进制/应用还要检查产物命名; 库分发确认没有多余归档资产.
+10. 检查标题, prerelease 状态和权限范围. 二进制/应用还要检查产物命名, 包括 Actions artifact 名; 库分发确认没有多余归档资产.
 11. 手动填写已有 tag 时确认所有 job 检出该 tag, 且 notes 和 generated notes 都使用该 tag.
 12. 检查 release 首次运行会创建, push 与手动重跑会更新正文. 二进制/应用还会覆盖现有产物.
 13. 仅二进制/应用: 在精确 tag, 非 tag commit 和脏 HEAD 三种状态下, 检查 CLI/TUI/GUI 的版本显示符合约定. 库分发确认包版本仍是 metadata 中的稳定版本, 没有被写入 git hash.

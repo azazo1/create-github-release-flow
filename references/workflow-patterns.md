@@ -61,6 +61,7 @@ jobs:
       tag_name: ${{ steps.release_context.outputs.tag_name }}
       source_ref: ${{ steps.release_context.outputs.source_ref }}
       version: ${{ steps.release_version.outputs.version }}
+      build_version: ${{ steps.build_version.outputs.build_version }}
     steps:
       - name: 解析发布上下文
         id: release_context
@@ -92,11 +93,11 @@ jobs:
           echo "tag_name=$tag_name" >> "$GITHUB_OUTPUT"
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
 
-      - name: 检出发布 tag
-        if: steps.release_context.outputs.is_release == 'true'
+      - name: 检出目标提交
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.release_context.outputs.source_ref }}
+          fetch-depth: 0
 
       - name: 校验发布版本
         id: release_version
@@ -104,6 +105,12 @@ jobs:
         shell: bash
         run: |
           # 读取项目 metadata, 并与解析后的 tag 名比较.
+
+      - name: 解析构建版本
+        id: build_version
+        shell: bash
+        run: |
+          # release 时输出 version; 否则输出最近版本号-7 位短 hash.
 
   build:
     needs: version
@@ -126,7 +133,7 @@ jobs:
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: PROJECT-${{ matrix.platform }}-${{ matrix.arch }}
+          name: PROJECT-${{ needs.version.outputs.build_version }}-${{ matrix.platform }}-${{ matrix.arch }}
           path: EXPECTED_PACKAGE_PATH
           if-no-files-found: error
           retention-days: 14
@@ -145,7 +152,7 @@ jobs:
           fetch-depth: 0
 ```
 
-没有 tag 时 `version` job 可以成功完成但不产生 version output. 只在 `is_release` 条件的步骤和 job 中消费该 output. 二进制/应用的打包和 artifact 上传不要再加 `is_release` 或 `workflow_dispatch` 条件, 非 release 产物用自动生成的构建版本号命名. 库分发省略打包, artifact 上传和 SHA256SUMS 步骤, 矩阵按测试需求覆盖. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout.
+没有 tag 时 `version` job 可以成功完成但不产生 version output. 只在 `is_release` 条件的步骤和 job 中消费该 output. 二进制/应用的打包和 artifact 上传不要再加 `is_release` 或 `workflow_dispatch` 条件, 非 release 产物用 `build_version` 命名, Actions artifact 名也要带上这个版本号以及 platform 和 arch. 库分发省略打包, artifact 上传和 SHA256SUMS 步骤, 矩阵按测试需求覆盖. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout.
 
 ## 依赖与构建缓存
 
