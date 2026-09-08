@@ -53,15 +53,18 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 - 二进制/应用: 二进制, 应用包和归档的输出路径; 各平台的编译 target, runner 和运行时兼容要求; CLI, TUI, GUI 等展示版本号的交互位置及其版本信息的生成方式.
 - 库: 包 metadata 中的版本字段, 现有测试矩阵, 以及是否已有 crates.io, PyPI, npm 等发布方式.
 
-仅当项目以二进制/应用方式分发, 且 CLI, TUI, GUI 等可能展示版本号时, 这些交互位置 (如 `--version`, About 对话框) 必须显示当前构建版本并标注构建 commit:
+仅当项目以二进制/应用方式分发, 且 CLI, TUI, GUI 等可能展示版本号时, 发布构建产物中的这些交互位置 (如 `--version`, About 对话框) 必须显示当前构建版本并标注构建 commit:
 
 - 构建 commit 恰好是某个版本 tag 时, 直接显示该 tag, 例如 `v1.2.3`.
 - 构建处于非 tag commit 时, 在最近一个版本 tag 后追加 `-` 和 7 位短 hash, 例如 `v1.2.3-a1b2c3d`.
 - HEAD 工作区有未提交改动时, 改用 `^` 分隔, 例如 `v1.2.3^a1b2c3d`.
 - 基础版本号样式跟随最近一个版本 tag, 不要固定假设带 `v` 前缀或三段式 SemVer.
+- 日常开发构建 (不经 `just dist` 或 CI 的直接构建) 不注入版本信息, 版本号显示 `dev-build`.
 
 > 版本号显示必须自动生成, 而不是手动编辑写死.
 > 库分发不要把 git describe 或短 hash 写入包版本. 包版本保持 metadata 中的稳定版本, 由 tag 与其严格对齐.
+
+版本自动嵌入逻辑 (如 Rust build script/vergen, Go `-ldflags -X`, CMake 构建期读取 git 等同类机制) 默认关闭, 只在发布构建路径通过显式开关 (如环境变量) 打开: 本地由 `just dist` 的打包脚本设置, CI 构建以同一机制注入 `version` 或 `build_version`. 不要让普通开发构建无条件读取 `.git`, 否则每次 commit 都会使增量编译缓存失效, `target` 等构建目录持续膨胀.
 
 优先调用项目已有的 task runner 或打包脚本. 平台专用打包包含应用目录, 图标, metadata 或签名准备时, 将逻辑放在项目脚本中, 不要把完整实现内联到 workflow.
 
@@ -282,7 +285,7 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 10. 检查标题, prerelease 状态和权限范围. 二进制/应用还要检查产物命名, 包括 Actions artifact 名; 库分发确认没有多余归档资产.
 11. 手动填写已有 tag 时确认所有 job 检出该 tag, 且 notes 和 generated notes 都使用该 tag.
 12. 检查 release 首次运行会创建, push 与手动重跑会更新正文. 二进制/应用还会覆盖现有产物.
-13. 仅二进制/应用: 在精确 tag, 非 tag commit 和脏 HEAD 三种状态下, 检查 CLI/TUI/GUI 的版本显示符合约定. 库分发确认包版本仍是 metadata 中的稳定版本, 没有被写入 git hash.
+13. 仅二进制/应用: 在精确 tag, 非 tag commit 和脏 HEAD 三种状态下, 检查 CLI/TUI/GUI 的版本显示符合约定; 日常开发构建显示 `dev-build`, 且构建脚本不会因 `.git` 变化触发重编. 库分发确认包版本仍是 metadata 中的稳定版本, 没有被写入 git hash.
 14. 确认缓存机制选择顺序正确, 专用缓存与项目实际匹配, 没有重复缓存同一路径, 且 fallback 缓存 miss 时仍能完整构建.
 
 本地检查不能证明所有 GitHub hosted runner 均可用. 明确说明仍需通过真实 tag run 验证的 runner 资格, 平台依赖和发布权限.
