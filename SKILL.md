@@ -64,27 +64,29 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 > 版本号显示必须自动生成, 而不是手动编辑写死.
 > 库分发不要把 git describe 或短 hash 写入包版本. 包版本保持 metadata 中的稳定版本, 由 tag 与其严格对齐.
 
-版本自动嵌入逻辑 (如 Rust build script/vergen, Go `-ldflags -X`, CMake 构建期读取 git 等同类机制) 默认关闭, 只在发布构建路径通过显式开关 (如环境变量) 打开: 本地由 `just dist` 的打包脚本设置, CI 构建以同一机制注入 `version` 或 `build_version`. 不要让普通开发构建无条件读取 `.git`, 否则每次 commit 都会使增量编译缓存失效, `target` 等构建目录持续膨胀.
+二进制/应用复制 [build-version.sh](references/build-version.sh) 和 [build-version.ps1](references/build-version.ps1) 到 `scripts/`, 按文件开头说明改占位符.
+
+版本自动嵌入逻辑 (如 Rust build script/vergen, Go `-ldflags -X`, CMake 构建期读取 git 等同类机制) 默认关闭, 只在发布构建路径通过显式开关 (如环境变量) 打开: 本地由 `just dist` 注入脚本结果, CI 用同一环境变量注入 `build_version`. 不要让普通开发构建无条件读取 `.git`, 否则每次 commit 都会使增量编译缓存失效, `target` 等构建目录持续膨胀.
 
 优先调用项目已有的 task runner 或打包脚本. 平台专用打包包含应用目录, 图标, metadata 或签名准备时, 将逻辑放在项目脚本中, 不要把完整实现内联到 workflow.
 
 仅在项目需要平台二进制打包, 并且需要新增 Just recipe 时, 统一提供 `just dist`. 该 recipe 根据当前运行平台执行相应构建, 必须不接受任何参数, 不要声明 `*args` 或位置参数, 也不要新增 `package-macos`, `package-windows` 等按平台命名的 recipe. 库分发不要为了走发布流程而新增 `just dist`.
 
-二进制/应用示例, 为同一 `dist` recipe 添加互斥的平台属性:
+二进制/应用示例, 为同一 `dist` recipe 添加互斥的平台属性, 并注入构建版本:
 
 ```justfile
 # 根据当前平台生成发布产物.
 [windows]
 dist:
-    powershell -NoProfile -File scripts/dist-windows.ps1
+    PROJECT_BUILD_VERSION="v$(powershell -NoProfile -File scripts/build-version.ps1 | tr -d '\r')" powershell -NoProfile -File scripts/dist-windows.ps1
 
 [macos]
 dist:
-    ./scripts/dist-macos.sh
+    PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" ./scripts/dist-macos.sh
 
 [linux]
 dist:
-    ./scripts/dist-linux.sh
+    PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" ./scripts/dist-linux.sh
 ```
 
 实现具体 YAML 片段时按需读取 [workflow-patterns.md](references/workflow-patterns.md), 不要一次性复制所有示例.
@@ -103,7 +105,7 @@ dist:
 - `tag_name`: tag push 的 ref name 或手动输入的 tag.
 - `source_ref`: tag 发布时为 `refs/tags/TAG`, 其他情况为当前事件的 `github.sha`.
 - `version`: 仅在 `is_release` 为 `true` 且版本校验成功后输出.
-- `build_version`: 二进制/应用必须始终输出. release 时等于 `version`; 非 release 时为最近版本号加 `-` 和 7 位短 hash, 例如 `1.2.3-a1b2c3d`. 库分发不需要这个 output.
+- `build_version`: 二进制/应用必须始终输出. release 时等于 `version`; 非 release 时用脚本 stdout. 库分发不需要这个 output.
 
 手动 tag 先用 `git check-ref-format "refs/tags/$TAG_NAME"` 校验格式, 再检出完整 tag. Tag 不存在时必须在构建开始前失败.
 

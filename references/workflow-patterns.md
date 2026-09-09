@@ -98,6 +98,7 @@ jobs:
         with:
           ref: ${{ steps.release_context.outputs.source_ref }}
           fetch-depth: 0
+          fetch-tags: true
 
       - name: 校验发布版本
         id: release_version
@@ -108,9 +109,18 @@ jobs:
 
       - name: 解析构建版本
         id: build_version
+        env:
+          IS_RELEASE: ${{ steps.release_context.outputs.is_release }}
+          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
         shell: bash
         run: |
-          # release 时输出 version; 否则输出最近版本号-7 位短 hash.
+          set -euo pipefail
+          if [[ "$IS_RELEASE" == "true" ]]; then
+            echo "build_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "build_version=$(bash scripts/build-version.sh)" >> "$GITHUB_OUTPUT"
 
   build:
     needs: version
@@ -123,8 +133,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.version.outputs.source_ref }}
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: 构建
+        env:
+          PROJECT_BUILD_VERSION: v${{ needs.version.outputs.build_version }}
         run: PROJECT_BUILD_COMMAND
 
       - name: 打包构建产物
