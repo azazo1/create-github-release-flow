@@ -132,8 +132,8 @@ dist:
 构建或测试 job 应配置依赖与构建缓存, 但缓存只用于加速, 不能作为发布正确性来源:
 
 - 优先使用该语言或工具链已验证的专用缓存 action, 例如 setup action 内置缓存或社区广泛使用的专用 cache action.
-- 没有可用专用机制时, 回退到 `actions/cache@v4`, 缓存路径覆盖包管理器缓存和构建缓存, 不缓存发布产物.
-- `actions/cache@v4` 的 key 包含 runner 系统, 矩阵架构和 lockfile hash, 并使用 `restore-keys` 回退; 不同平台和架构必须隔离.
+- 没有可用专用机制时, 回退到 `actions/cache@v6`, 缓存路径覆盖包管理器缓存和构建缓存, 不缓存发布产物.
+- `actions/cache@v6` 的 key 包含 runner 系统, 矩阵架构和 lockfile hash, 并使用 `restore-keys` 回退; 不同平台和架构必须隔离.
 - 缓存 miss 或恢复失败不能导致构建失败, 干净环境必须能完整构建.
 - 二进制/应用: 最终产物必须通过 artifact 汇总, 不依赖缓存保存发布文件.
 

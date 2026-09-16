@@ -17,7 +17,7 @@
   - [创建或更新 release](#创建或更新-release)
   - [库分发的 notes-only release](#库分发的-notes-only-release)
 
-示例中的 action major version 和 runner 标签只是结构的一部分. 使用前确认当前稳定版本, runner 可用性和项目的 action pinning 策略.
+示例中的 action major version 和 runner 标签只是结构的一部分. 使用前确认当前稳定版本, runner 可用性和项目的 action pinning 策略. 示例统一使用 node24 runtime 的 action major, 因为 node20 runtime 的旧 major 会在 runner 移除 node20 后直接失败: checkout v5+, upload-artifact v6+, download-artifact v7+, cache v5+, setup-node v5+, setup-python v6+. 这些 major 要求 runner 不低于 2.327.1, 自建 runner 需要先升级 runner 版本.
 
 ## 触发与并发
 
@@ -94,7 +94,7 @@ jobs:
           echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
 
       - name: 检出目标提交
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.release_context.outputs.source_ref }}
           fetch-depth: 0
@@ -130,7 +130,7 @@ jobs:
         include: []
     steps:
       - name: 检出目标提交
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.source_ref }}
           fetch-depth: 0
@@ -145,7 +145,7 @@ jobs:
         run: PROJECT_PACKAGE_COMMAND
 
       - name: 上传构建产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PROJECT-${{ needs.version.outputs.build_version }}-${{ matrix.platform }}-${{ matrix.arch }}
           path: EXPECTED_PACKAGE_PATH
@@ -160,7 +160,7 @@ jobs:
       contents: write
     steps:
       - name: 检出发布 tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.source_ref }}
           fetch-depth: 0
@@ -186,7 +186,7 @@ jobs:
 
 ```yaml
 - name: 恢复依赖与构建缓存
-  uses: actions/cache@v4
+  uses: actions/cache@v6
   with:
     path: |
       PROJECT_DEPENDENCY_CACHE_PATH
@@ -196,7 +196,7 @@ jobs:
       ${{ runner.os }}-${{ matrix.arch }}-
 ```
 
-`actions/cache@v4` 的 path 要覆盖包管理器缓存和构建缓存, 不缓存发布产物; key 包含 runner 系统, 矩阵架构和 lockfile hash; restore-keys 用于 key 变化时的回退. 缓存 miss 或恢复失败不能导致构建失败, 干净环境必须能完整构建. 不同平台和架构的缓存必须隔离, 不要对同一路径同时配置专用缓存和通用缓存. 没有 lockfile 时使用稳定的依赖清单 hash 或跳过缓存, 不要只按分支名生成 key.
+`actions/cache@v6` 的 path 要覆盖包管理器缓存和构建缓存, 不缓存发布产物; key 包含 runner 系统, 矩阵架构和 lockfile hash; restore-keys 用于 key 变化时的回退. 缓存 miss 或恢复失败不能导致构建失败, 干净环境必须能完整构建. 不同平台和架构的缓存必须隔离, 不要对同一路径同时配置专用缓存和通用缓存. 没有 lockfile 时使用稳定的依赖清单 hash 或跳过缓存, 不要只按分支名生成 key.
 
 ## 平台与架构
 
