@@ -296,6 +296,7 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 12. 检查 release 首次运行会创建, push 与手动重跑会更新正文. 二进制/应用还会覆盖现有产物.
 13. 仅二进制/应用: 在精确 tag, 非 tag commit 和脏 HEAD 三种状态下, 检查 CLI/TUI/GUI 的版本显示符合约定; 日常开发构建显示 `dev-build`, 且构建脚本不会因 `.git` 变化触发重编. 库分发确认包版本仍是 metadata 中的稳定版本, 没有被写入 git hash.
 14. 确认缓存机制选择顺序正确, 专用缓存与项目实际匹配, 没有重复缓存同一路径, 且 fallback 缓存 miss 时仍能完整构建.
+15. 不需要在项目当中编写发布工作流的文档和发布新版本的操作说明, agent 通过阅读此 skill 可以重新获取相关信息. 也不需要发布新版本的 just recipe, 需要 agent 手动实现.
 
 本地检查不能证明所有 GitHub hosted runner 均可用. 明确说明仍需通过真实 tag run 验证的 runner 资格, 平台依赖和发布权限.
 
