@@ -166,7 +166,7 @@ jobs:
           fetch-depth: 0
 ```
 
-没有 tag 时 `version` job 可以成功完成但不产生 version output. 只在 `is_release` 条件的步骤和 job 中消费该 output. 二进制/应用的打包和 artifact 上传不要再加 `is_release` 或 `workflow_dispatch` 条件, 非 release 产物用 `build_version` 命名, Actions artifact 名也要带上这个版本号以及 platform 和 arch. 库分发省略打包, artifact 上传和 SHA256SUMS 步骤, 矩阵按测试需求覆盖. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout.
+没有 tag 时 `version` job 可以成功完成但不产生 version output. 只在 `is_release` 条件的步骤和 job 中消费该 output. 二进制/应用的打包和 artifact 上传不要再加 `is_release` 或 `workflow_dispatch` 条件, 非 release 产物用 `build_version` 命名, 平台相关产物的 Actions artifact 名也要带上这个版本号以及 platform 和 arch, 平台无关的托管运行时产物 (如 .NET dll, Java jar) 按其自身规则命名, 不加 platform 和 arch. 库分发省略打包, artifact 上传和 SHA256SUMS 步骤, 矩阵按测试需求覆盖. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout.
 
 ## 依赖与构建缓存
 

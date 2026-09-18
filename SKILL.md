@@ -179,6 +179,8 @@ PROJECT-VERSION-PLATFORM-ARCH.EXT
 
 例如 `project-1.2.3-linux-x86_64.tar.gz`, `project-1.2.3-windows-aarch64.zip` 和 `project-1.2.3-macos-aarch64.dmg`. 非 release 运行使用 `build_version`, 例如 `project-1.2.3-a1b2c3d-linux-x86_64.tar.gz`. Actions artifact 名使用同一格式但不带扩展名, 例如 `project-1.2.3-a1b2c3d-linux-x86_64`, 不要写成 `project-aarch64`.
 
+平台无关的托管运行时产物, 例如 .NET dll 程序集和 Java jar/war, 不强行添加 PLATFORM-ARCH 后缀, 直接命名为 PROJECT-VERSION.EXT, Actions artifact 名同理, 例如 `project-1.2.3.jar` 与 `project-1.2.3`.
+
 构建 job 为每个矩阵项上传一个独立 artifact, 缺少文件时直接失败. 该步骤不限于 tag 或手动触发. 发布专用 artifact 可以设置较短 retention. Release job 下载并合并全部 artifact, 只对预期扩展名生成统一的 `SHA256SUMS`. SHA256SUMS 和 GitHub Release 只在 `is_release` 为 `true` 时生成.
 
 在生成校验和前显式统计归档数量. 在上传 release 前再次统计归档和 `SHA256SUMS` 的总数量. 数量必须与矩阵一致, 防止 glob 静默漏传或混入旧文件.
