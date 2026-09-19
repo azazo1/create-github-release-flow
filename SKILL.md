@@ -202,7 +202,22 @@ git tag -a "v0.1.0" --cleanup=verbatim \
 
 必须使用 `--cleanup=verbatim`. Git 默认的 `strip` 模式会把 Markdown 中以 `#` 开头的标题当作注释移除. 不要再用 `-m` 单独维护另一份 tag 正文. 如果 tag 已存在或已推送, 不要直接覆盖, 应先报告 annotation 与版本文件不一致.
 
-提交版本号和说明文件, 创建 annotated tag, push 分支和 tag 这组本地 git 写操作在一次提权中连续执行完, 不要逐步拆成多次提权. 提权前先完成全部检查并确认 annotation 与版本文件一致, 提权后只连续执行这组 git 写操作, 不混入其他任务.
+从版本号同步, notes 文件, annotated tag 到 push 分支和 tag, 全程在一次提权中执行完毕, 不要逐步拆成多次提权. 实际操作是把版本号改动和 `docs/changelog/VERSION.md` 一起 stage 并 commit, 再用该文件创建 annotated tag, 最后 push 分支和 tag. 命令写成一条命令链, 每个 git 命令独占一行, 用 `&&` 连接, 例如版本存于 Cargo.toml 的项目发布 v0.1.0:
+
+```shell
+git add Cargo.toml Cargo.lock docs/changelog/0.1.0.md &&
+git commit -m "chore(release): v0.1.0" &&
+git tag -a "v0.1.0" --cleanup=verbatim -F "docs/changelog/0.1.0.md" &&
+git push origin main &&
+git push origin "v0.1.0"
+```
+
+- `git add` 只 stage 版本号改动和对应 notes 文件, 版本文件按项目实际替换, 如 `pyproject.toml`, `package.json` 及各自 lockfile; tag 是唯一版本来源时只 add notes 文件.
+- commit message 跟随项目现有 release commit 风格, 不固定使用 `chore(release)`.
+- `git tag` 必须保持上文 annotated tag 形式, `--cleanup=verbatim` 和 `-F` 指向同一个 notes 文件.
+- 分支名以项目默认分支为准. 版本号尚未同步时, 同步 commit 就是这条链中的 commit, 不要拆到链外.
+
+提权前完成全部检查并确认 annotation 与版本文件一致, 提权执行中只包含这条 git 命令链, 不混入其他任务.
 
 人工说明需要覆盖用户可见变化, 兼容性影响和升级操作. 只记录相对上一个发布版本形成净变化的用户可见内容. 库分发侧重 API, 兼容性和迁移; 没有安装包时, Upgrade Notes 写依赖版本和 API 迁移即可, 不要按二进制安装包的口吻写升级步骤. 如果某个改动在区间内被加入后又移除, 且当前版本相对上一个发布版本没有任何可观察差异, 则该改动完全透明, changelog 不需要体现. 文件缺失或为空时发布直接失败. 使用以下模板, 只保留实际有内容的 section:
 
