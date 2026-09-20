@@ -72,6 +72,8 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 
 仅在项目需要平台二进制打包, 并且需要新增 Just recipe 时, 统一提供 `just dist`. 该 recipe 根据当前运行平台执行相应构建, 必须不接受任何参数, 不要声明 `*args` 或位置参数, 也不要新增 `package-macos`, `package-windows` 等按平台命名的 recipe. 库分发不要为了走发布流程而新增 `just dist`.
 
+桌面应用默认形态 (安装版) 就是 `just dist` 的产物. 只有当项目明确提供便携版形态时, 才额外新增同样不接受参数的 `just dist-portable`; 不要用参数或环境变量在两种形态之间切换, 也不要新增按平台命名的 recipe.
+
 二进制/应用示例, 为同一 `dist` recipe 添加互斥的平台属性, 并注入构建版本:
 
 ```justfile
@@ -149,12 +151,14 @@ dist:
 
 | 平台 | 架构 | 常见归档 |
 | --- | --- | --- |
-| Linux | `x86_64` | `.tar.gz` |
-| Linux | `aarch64` | `.tar.gz` |
-| Windows | `x86_64` | `.zip` |
-| Windows | `aarch64` | `.zip` |
+| Linux | `x86_64` | CLI 使用 `.tar.gz`; 桌面应用安装版 `.tar.gz` (`-setup`), 可选便携版 `.tar.gz` (`-portable`) |
+| Linux | `aarch64` | 同上 |
+| Windows | `x86_64` | CLI 使用 `.zip`; 桌面应用安装版 `.exe` (`-setup`, Inno Setup), 可选便携版 `.zip` (`-portable`) |
+| Windows | `aarch64` | 同上 |
 | macOS | `x86_64` | CLI 使用 `.tar.gz`, 桌面应用使用 `.dmg` |
 | macOS | `aarch64` | CLI 使用 `.tar.gz`, 桌面应用使用 `.dmg` |
+
+桌面应用默认按安装版分发, 便携版只在项目明确提供该形态时才出产物. 安装布局, 安装器要求与自动更新落地方式见 desktop-app-skill.
 
 在实现时查阅 GitHub 官方 runner 文档, 确认当前可用的 runner 标签和仓库资格. 优先使用对应系统和架构的原生 runner. 无法原生构建时使用项目成熟的交叉编译工具链, 并明确 linker, sysroot 和系统库要求.
 
@@ -167,6 +171,8 @@ dist:
 - 不适合在 CI 中启动的 GUI 或服务程序, 检查目标文件存在, 可执行权限和 ELF, PE 或 Mach-O 文件格式.
 - 应用包或安装镜像检查目录结构, 主程序和必要资源.
 - macOS 桌面应用 dmg 必须包含指向 `/Applications` 的符号链接和应用的 `.app` 包, 校验方式见 [workflow-patterns.md](references/workflow-patterns.md#平台产物校验).
+- Windows 桌面应用安装器检查 PE 文件头, 并在 windows runner 上用自动更新同款的静默参数 (`/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOICONS`) 装到临时目录, 断言主程序与随附 dll 都已就位, 再用该目录里的 `unins000.exe` 静默卸载. 这一步同时验证了自动更新要走的静默路径, 校验片段见 [workflow-patterns.md](references/workflow-patterns.md#平台产物校验).
+- Linux 桌面应用安装包断言含 `install.sh` 与 `payload/` 下的主程序, 再用 `install.sh --silent --prefix <临时目录>` 装一次, 断言可执行位, desktop 项与图标都落在该前缀内; `install.sh` 因此必须支持 `--prefix`.
 - 无法直接运行的交叉编译产物使用模拟器, 加载检查或文件格式检查.
 
 不要为了形式统一而强行执行会启动 GUI, 后台服务或交互流程的二进制.
@@ -174,16 +180,18 @@ dist:
 产物名使用统一格式:
 
 ```text
-PROJECT-VERSION-PLATFORM-ARCH.EXT
+PROJECT-VERSION-PLATFORM-ARCH[-VARIANT].EXT
 ```
 
 例如 `project-1.2.3-linux-x86_64.tar.gz`, `project-1.2.3-windows-aarch64.zip` 和 `project-1.2.3-macos-aarch64.dmg`. 非 release 运行使用 `build_version`, 例如 `project-1.2.3-a1b2c3d-linux-x86_64.tar.gz`. Actions artifact 名使用同一格式但不带扩展名, 例如 `project-1.2.3-a1b2c3d-linux-x86_64`, 不要写成 `project-aarch64`.
+
+VARIANT 是可选段, 只用于同一平台同一架构存在多种分发形态的桌面应用: 安装版用 `setup`, 便携版用 `portable`, 例如 `project-1.2.3-windows-x86_64-setup.exe`, `project-1.2.3-linux-x86_64-portable.tar.gz`, 以及对应的 Actions artifact 名 `project-1.2.3-windows-x86_64-setup`. CLI 与库产物, 以及只有单一形态的 macOS 桌面应用 dmg 都不带这一段. 形态定义与安装器细节见 desktop-app-skill.
 
 平台无关的托管运行时产物, 例如 .NET dll 程序集和 Java jar/war, 不强行添加 PLATFORM-ARCH 后缀, 直接命名为 PROJECT-VERSION.EXT, Actions artifact 名同理, 例如 `project-1.2.3.jar` 与 `project-1.2.3`.
 
 构建 job 为每个矩阵项上传一个独立 artifact, 缺少文件时直接失败. 该步骤不限于 tag 或手动触发. 发布专用 artifact 可以设置较短 retention. Release job 下载并合并全部 artifact, 只对预期扩展名生成统一的 `SHA256SUMS`. SHA256SUMS 和 GitHub Release 只在 `is_release` 为 `true` 时生成.
 
-在生成校验和前显式统计归档数量. 在上传 release 前再次统计归档和 `SHA256SUMS` 的总数量. 数量必须与矩阵一致, 防止 glob 静默漏传或混入旧文件.
+在生成校验和前显式统计归档数量. 在上传 release 前再次统计归档和 `SHA256SUMS` 的总数量. 数量必须与矩阵一致, 防止 glob 静默漏传或混入旧文件. 桌面应用按项目实际提供的形态计数: 只出安装版时每个平台架构一项, 同时提供便携版时再加一项, 期望值按矩阵展开后的总数填写.
 
 ### 4. 维护 release notes
 
@@ -305,12 +313,12 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 2. 确认 branch, PR 和未填写 tag 的手动触发不会创建 release. 二进制/应用会构建并上传 artifact; 库分发会跑测试或编译检查, 且没有为形式而上传的空 artifact.
 3. 模拟合法与非法 tag, 确认版本校验和 metadata 读取正确.
 4. 在干净环境运行正式检查命令. 二进制/应用还要跑平台校验和打包命令.
-5. 二进制/应用: 确认全部平台与架构组合在 branch, PR, tag 和手动触发上都有校验, 打包和 artifact 上传步骤, 且仅 tag 发布会创建 release. 库分发: 确认测试矩阵覆盖项目现有需求, 且仅 tag 发布会创建 release.
-6. 二进制/应用: 确认 release job 等待全部构建成功, 严格检查产物数量并生成 `SHA256SUMS`. 库分发: 确认 release job 等待全部检查成功, 且不会因缺少归档失败.
+5. 二进制/应用: 确认全部平台与架构组合在 branch, PR, tag 和手动触发上都有校验, 打包和 artifact 上传步骤, 且仅 tag 发布会创建 release; 桌面应用还要确认项目实际提供的每个形态都有各自的打包与校验步骤. 库分发: 确认测试矩阵覆盖项目现有需求, 且仅 tag 发布会创建 release.
+6. 二进制/应用: 确认 release job 等待全部构建成功, 严格检查产物数量并生成 `SHA256SUMS`; 桌面应用的数量期望值按安装版与 (若有) 便携版展开后的总数填写. 库分发: 确认 release job 等待全部检查成功, 且不会因缺少归档失败.
 7. 确认版本化 notes 在创建 tag 前已提交, 遵循 release notes 模板, `git tag -F` 使用 `--cleanup=verbatim`, annotation 保留 Markdown 标题并与文件一致.
 8. 确认 checkout 后会精确 refetch 目标 tag object, lightweight tag, 空 annotation 和内容不一致都会失败.
 9. 检查可选 base tag 会被校验, generated notes 会用 `---` 分隔并追加在人工正文之后.
-10. 检查标题, prerelease 状态和权限范围. 二进制/应用还要检查产物命名, 包括 Actions artifact 名; 库分发确认没有多余归档资产.
+10. 检查标题, prerelease 状态和权限范围. 二进制/应用还要检查产物命名, 包括 Actions artifact 名, 桌面应用确认安装版与便携版都带上对应的变体段; 库分发确认没有多余归档资产.
 11. 手动填写已有 tag 时确认所有 job 检出该 tag, 且 notes 和 generated notes 都使用该 tag.
 12. 检查 release 首次运行会创建, push 与手动重跑会更新正文. 二进制/应用还会覆盖现有产物.
 13. 仅二进制/应用: 在精确 tag, 非 tag commit 和脏 HEAD 三种状态下, 检查 CLI/TUI/GUI 的版本显示符合约定; 日常开发构建显示 `dev-build`, 且构建脚本不会因 `.git` 变化触发重编. 库分发确认包版本仍是 metadata 中的稳定版本, 没有被写入 git hash.

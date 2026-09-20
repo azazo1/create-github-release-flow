@@ -166,7 +166,7 @@ jobs:
           fetch-depth: 0
 ```
 
-没有 tag 时 `version` job 可以成功完成但不产生 version output. 只在 `is_release` 条件的步骤和 job 中消费该 output. 二进制/应用的打包和 artifact 上传不要再加 `is_release` 或 `workflow_dispatch` 条件, 非 release 产物用 `build_version` 命名, 平台相关产物的 Actions artifact 名也要带上这个版本号以及 platform 和 arch, 平台无关的托管运行时产物 (如 .NET dll, Java jar) 按其自身规则命名, 不加 platform 和 arch. 库分发省略打包, artifact 上传和 SHA256SUMS 步骤, 矩阵按测试需求覆盖. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout.
+没有 tag 时 `version` job 可以成功完成但不产生 version output. 只在 `is_release` 条件的步骤和 job 中消费该 output. 二进制/应用的打包和 artifact 上传不要再加 `is_release` 或 `workflow_dispatch` 条件, 非 release 产物用 `build_version` 命名, 平台相关产物的 Actions artifact 名也要带上这个版本号以及 platform 和 arch (桌面应用还要带上形态变体段), 平台无关的托管运行时产物 (如 .NET dll, Java jar) 按其自身规则命名, 不加 platform 和 arch. 库分发省略打包, artifact 上传和 SHA256SUMS 步骤, 矩阵按测试需求覆盖. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout.
 
 ## 依赖与构建缓存
 
@@ -206,14 +206,16 @@ jobs:
 
 | 平台 | 架构 | Rust target | 常见归档 |
 | --- | --- | --- | --- |
-| Linux | x86_64 | `x86_64-unknown-linux-gnu` | `.tar.gz` |
-| Linux | aarch64 | `aarch64-unknown-linux-gnu` | `.tar.gz` |
-| Linux | x86_64 | `x86_64-unknown-linux-musl` | `.tar.gz` |
-| Linux | aarch64 | `aarch64-unknown-linux-musl` | `.tar.gz` |
-| Windows | x86_64 | `x86_64-pc-windows-msvc` | `.zip` |
-| Windows | aarch64 | `aarch64-pc-windows-msvc` | `.zip` |
+| Linux | x86_64 | `x86_64-unknown-linux-gnu` | CLI 使用 `.tar.gz`; 桌面应用安装版 `.tar.gz` (`-setup`), 可选便携版 `.tar.gz` (`-portable`) |
+| Linux | aarch64 | `aarch64-unknown-linux-gnu` | 同上 |
+| Linux | x86_64 | `x86_64-unknown-linux-musl` | 同上 |
+| Linux | aarch64 | `aarch64-unknown-linux-musl` | 同上 |
+| Windows | x86_64 | `x86_64-pc-windows-msvc` | CLI 使用 `.zip`; 桌面应用安装版 `.exe` (`-setup`, Inno Setup), 可选便携版 `.zip` (`-portable`) |
+| Windows | aarch64 | `aarch64-pc-windows-msvc` | 同上 |
 | macOS | x86_64 | `x86_64-apple-darwin` | CLI 使用 `.tar.gz`, 桌面应用使用 `.dmg` |
 | macOS | aarch64 | `aarch64-apple-darwin` | CLI 使用 `.tar.gz`, 桌面应用使用 `.dmg` |
+
+桌面应用默认只出安装版产物; 便携版产物只在该项目明确提供这一形态时才存在, 打包与安装布局的细节见 desktop-app-skill. 变体段与扩展名的完整规则见 SKILL.md 的产物命名小节.
 
 动态链接的 Linux 产物通常会继承构建 runner 的 glibc 下限. 需要兼容旧发行版时, 明确评估较旧 runner, 静态链接方案或容器化 sysroot, 不要把普通 GNU 动态链接产物描述为通用静态二进制.
 
@@ -297,6 +299,61 @@ Linux 的 `EXPECTED_FORMAT` 使用 `ELF`, macOS 使用 `Mach-O`. 还需要检查
 ```
 
 `readlink "$mount_point/Applications"` 应解析到 `/Applications`. 如果项目打包脚本使用别名替身而不是符号链接 (例如 `ln -s` 之外的 alias 方式), 调整对应断言, 但必须确保该目录确实指向 `/Applications`.
+
+桌面应用的 Windows 安装器要校验文件格式, 并在 runner 上用自动更新会用到的那套静默参数装到临时目录, 确认载荷里的主程序与随附 dll 都确实进了包 (只检查文件存在无法发现载荷漏打):
+
+```yaml
+- name: 校验 Windows 安装器能静默装出完整载荷
+  shell: pwsh
+  run: |
+    $ErrorActionPreference = 'Stop'
+    $installer = "release-artifacts/PROJECT-0.0.0-windows-x86_64-setup.exe"
+    $bytes = [System.IO.File]::ReadAllBytes($installer)
+    if ($bytes.Length -lt 2 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) {
+      throw "PE 文件头无效: $installer"
+    }
+
+    $target = Join-Path $env:RUNNER_TEMP "installer-check"
+    $log = Join-Path $env:RUNNER_TEMP "installer-check.log"
+    & $installer '/SP-' '/VERYSILENT' '/SUPPRESSMSGBOXES' '/NORESTART' '/NOICONS' "/DIR=$target" "/LOG=$log"
+    if ($LASTEXITCODE -ne 0) { throw "安装器退出码: $LASTEXITCODE, 日志: $log" }
+
+    foreach ($name in @("PROJECT.exe", "PROJECT.dll")) {
+      $installed = Join-Path $target $name
+      if (-not (Test-Path -LiteralPath $installed -PathType Leaf)) {
+        throw "安装目录缺少: $installed"
+      }
+    }
+
+    & (Join-Path $target "unins000.exe") '/VERYSILENT' '/SUPPRESSMSGBOXES' '/NORESTART'
+    if ($LASTEXITCODE -ne 0) { throw "卸载器退出码: $LASTEXITCODE" }
+```
+
+Linux 安装包要校验容器结构, 并用 `--prefix` 指向临时目录跑一次静默安装, 确认可执行位, 桌面项与图标都落在指定前缀里:
+
+```yaml
+- name: 校验 Linux 安装包结构与静默安装
+  shell: bash
+  run: |
+    set -euo pipefail
+    setup="release-artifacts/PROJECT-0.0.0-linux-x86_64-setup.tar.gz"
+
+    tar -tzf "$setup" | grep -qx 'install.sh'
+    tar -tzf "$setup" | grep -q '^payload/'
+    tar -tzf "$setup" | grep -q '^payload/PROJECT$'
+
+    prefix="$(mktemp -d)"
+    staging="$(mktemp -d)"
+    tar -xzf "$setup" -C "$staging"
+    "$staging/install.sh" --silent --prefix "$prefix" --log "$staging/install.log"
+
+    test -x "$prefix/opt/PROJECT/PROJECT"
+    test -s "$prefix/share/applications/PROJECT.desktop"
+    grep -Fq "$prefix/opt/PROJECT/PROJECT" "$prefix/share/applications/PROJECT.desktop"
+    test -f "$prefix/share/icons/hicolor/256x256/apps/PROJECT.png"
+```
+
+`install.sh` 必须支持 `--prefix`, 否则这条校验只能靠人工在真实 home 目录里跑; 便携版归档仍按上面的文件格式与可执行位检查, 并把变体段写进断言路径.
 
 ## 发布说明与 annotated tag
 
@@ -406,7 +463,7 @@ Release job 按 `source_ref` 完整 checkout tags 后, 精确 refetch 远端 tag
     set -euo pipefail
     shopt -s nullglob
     cd release-artifacts
-    archives=(PROJECT-*.tar.gz PROJECT-*.zip PROJECT-*.dmg)
+    archives=(PROJECT-*.tar.gz PROJECT-*.zip PROJECT-*.exe PROJECT-*.dmg)
 
     if (( ${#archives[@]} != EXPECTED_ARCHIVE_COUNT )); then
       echo "预期 EXPECTED_ARCHIVE_COUNT 个归档, 实际找到 ${#archives[@]} 个" >&2
@@ -416,7 +473,7 @@ Release job 按 `source_ref` 完整 checkout tags 后, 精确 refetch 远端 tag
     sha256sum "${archives[@]}" > SHA256SUMS
 ```
 
-限制 glob 只匹配预期归档, 避免 `SHA256SUMS` 被递归纳入自身. 上传前再校验 assets 总数为归档数加 1.
+限制 glob 只匹配预期归档, 避免 `SHA256SUMS` 被递归纳入自身. 上传前再校验 assets 总数为归档数加 1. 桌面应用同时提供安装版与便携版时, 每个矩阵项按项目实际提供的形态各计一份, 期望数量按矩阵展开后的总数填写, 不要沿用只算一种形态的旧值.
 
 ## 创建或更新 release
 
@@ -435,6 +492,7 @@ Release job 按 `source_ref` 完整 checkout tags 后, 精确 refetch 远端 tag
     assets=(
       release-artifacts/PROJECT-*.tar.gz
       release-artifacts/PROJECT-*.zip
+      release-artifacts/PROJECT-*.exe
       release-artifacts/PROJECT-*.dmg
       release-artifacts/SHA256SUMS
     )
