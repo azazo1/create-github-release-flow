@@ -2,6 +2,8 @@
 
 仅在实现对应步骤时读取和改写这些片段. 不要直接复制未替换的占位符.
 
+本文件只放语言无关的骨架. 缓存机制, 版本校验命令, 版本注入步骤, 平台目标与二进制路径这些语言相关内容在 [langs/](langs/) 下的对应语言模块里, 按 SKILL.md 的分派表读取.
+
 ## 目录
 
 - [GitHub Release Workflow Patterns](#github-release-workflow-patterns)
@@ -10,14 +12,13 @@
   - [CI, tag 与手动条件](#ci-tag-与手动条件)
   - [依赖与构建缓存](#依赖与构建缓存)
   - [平台与架构](#平台与架构)
-  - [Rust 版本校验](#rust-版本校验)
   - [平台产物校验](#平台产物校验)
   - [发布说明与 annotated tag](#发布说明与-annotated-tag)
   - [校验和与数量检查](#校验和与数量检查)
   - [创建或更新 release](#创建或更新-release)
   - [库分发的 notes-only release](#库分发的-notes-only-release)
 
-示例中的 action major version 和 runner 标签只是结构的一部分. 使用前确认当前稳定版本, runner 可用性和项目的 action pinning 策略. 示例统一使用 node24 runtime 的 action major, 因为 node20 runtime 的旧 major 会在 runner 移除 node20 后直接失败: checkout v5+, upload-artifact v6+, download-artifact v7+, cache v5+, setup-node v5+, setup-python v6+. 这些 major 要求 runner 不低于 2.327.1, 自建 runner 需要先升级 runner 版本.
+示例中的 action major version 和 runner 标签只是结构的一部分. 使用前复核当前稳定版本, runner 可用性和项目的 action pinning 策略. 示例统一使用 node24 runtime 的 action major, 因为 node20 runtime 的旧 major 会在 runner 移除 node20 后直接失败. 本次核对到的当前 major: checkout v7, upload-artifact v7, download-artifact v8, cache v6, setup-go v7, setup-node v7, setup-python v7, setup-dotnet v6. 这些 major 要求 runner 不低于 2.327.1, 自建 runner 需要先升级 runner 版本.
 
 ## 触发与并发
 
@@ -105,7 +106,8 @@ jobs:
         if: steps.release_context.outputs.is_release == 'true'
         shell: bash
         run: |
-          # 读取项目 metadata, 并与解析后的 tag 名比较.
+          # 按语言模块给出的结构化 metadata 命令读取包版本, 并与解析后的 tag 名比较.
+          # tag 是唯一版本来源的项目改为校验 tag 格式与 notes 文件存在性.
 
       - name: 解析构建版本
         id: build_version
@@ -170,19 +172,7 @@ jobs:
 
 ## 依赖与构建缓存
 
-构建或测试 job 应配置依赖与构建缓存, 但缓存只用于加速, 不能作为发布正确性来源. 优先使用该语言或工具链已验证的专用缓存机制, 没有可用专用机制时才回退到通用缓存.
-
-常用优先方案:
-
-| 工具链/语言 | 优先缓存机制 |
-| --- | --- |
-| Rust | `Swatinem/rust-cache` |
-| Node.js | `actions/setup-node` 的 `cache` 输入 |
-| Python | `actions/setup-python` 的 `cache` 输入 |
-| Go | `actions/setup-go` 的 `cache` 输入 |
-| uv | `astral-sh/setup-uv` 的 `enable-cache` 输入 |
-
-使用前确认对应 action 的当前稳定版本, 项目 lockfile 和仓库 pinning 策略. 专用缓存不可用或不匹配项目结构时, 使用通用缓存:
+构建或测试 job 应配置依赖与构建缓存, 但缓存只用于加速, 不能作为发布正确性来源. 优先使用该语言或工具链已验证的专用缓存机制, 具体 action 与输入见语言模块; 没有可用专用机制时才回退到通用缓存:
 
 ```yaml
 - name: 恢复依赖与构建缓存
@@ -202,55 +192,26 @@ jobs:
 
 仅二进制/应用分发需要此归档矩阵. 库分发按项目现有测试需求覆盖平台, 不要为了发布归档去扩矩阵.
 
-在使用前查阅 GitHub hosted runner 官方文档, 不要仅依赖此表. 常见原生 64 位目标如下:
+在使用前查阅 GitHub hosted runner 官方文档, 不要仅依赖此表. 各语言的 target 三元组, RID 与编译目标见语言模块. 常见原生 64 位平台与 runner 标签如下:
 
-| 平台 | 架构 | Rust target | 常见归档 |
+| 平台 | 架构 | runner 标签 | 常见归档 |
 | --- | --- | --- | --- |
-| Linux | x86_64 | `x86_64-unknown-linux-gnu` | CLI 使用 `.tar.gz`; 桌面应用安装版 `.tar.gz` (`-setup`), 可选便携版 `.tar.gz` (`-portable`) |
-| Linux | aarch64 | `aarch64-unknown-linux-gnu` | 同上 |
-| Linux | x86_64 | `x86_64-unknown-linux-musl` | 同上 |
-| Linux | aarch64 | `aarch64-unknown-linux-musl` | 同上 |
-| Windows | x86_64 | `x86_64-pc-windows-msvc` | CLI 使用 `.zip`; 桌面应用安装版 `.exe` (`-setup`, Inno Setup), 可选便携版 `.zip` (`-portable`) |
-| Windows | aarch64 | `aarch64-pc-windows-msvc` | 同上 |
-| macOS | x86_64 | `x86_64-apple-darwin` | CLI 使用 `.tar.gz`, 桌面应用使用 `.dmg` |
-| macOS | aarch64 | `aarch64-apple-darwin` | CLI 使用 `.tar.gz`, 桌面应用使用 `.dmg` |
+| Linux | x86_64 | `ubuntu-24.04` | CLI 使用 `.tar.gz`; 桌面应用安装版 `.tar.gz` (`-setup`), 可选便携版 `.tar.gz` (`-portable`) |
+| Linux | aarch64 | `ubuntu-24.04-arm` | 同上 |
+| Windows | x86_64 | `windows-2025` | CLI 使用 `.zip`; 桌面应用安装版 `.exe` (`-setup`, Inno Setup), 可选便携版 `.zip` (`-portable`) |
+| Windows | aarch64 | `windows-11-arm` | 同上 |
+| macOS | x86_64 | `macos-15-intel` | CLI 使用 `.tar.gz`, 桌面应用使用 `.dmg` |
+| macOS | aarch64 | `macos-15` | CLI 使用 `.tar.gz`, 桌面应用使用 `.dmg` |
+
+不要用 `*-latest` 推断架构: `ubuntu-latest` 是 x64, `macos-latest` 现在是 macOS 26 arm64, `macos-14` 已进入 deprecated.
 
 桌面应用默认只出安装版产物; 便携版产物只在该项目明确提供这一形态时才存在, 打包与安装布局的细节见 desktop-app-skill. 变体段与扩展名的完整规则见 SKILL.md 的产物命名小节.
 
 动态链接的 Linux 产物通常会继承构建 runner 的 glibc 下限. 需要兼容旧发行版时, 明确评估较旧 runner, 静态链接方案或容器化 sysroot, 不要把普通 GNU 动态链接产物描述为通用静态二进制.
 
-## Rust 版本校验
-
-通过结构化 metadata 获取包版本:
-
-```yaml
-- name: 校验 tag 与包版本
-  id: release_version
-  if: steps.release_context.outputs.is_release == 'true'
-  env:
-    TAG_NAME: ${{ steps.release_context.outputs.tag_name }}
-  shell: bash
-  run: |
-    set -euo pipefail
-    package_version="$(
-      cargo metadata --locked --no-deps --format-version 1 |
-        jq -er '.packages[] | select(.name == "PROJECT") | .version'
-    )"
-    expected_tag="v$package_version"
-
-    if [[ "$TAG_NAME" != "$expected_tag" ]]; then
-      echo "tag $TAG_NAME 与包版本 $package_version 不一致" >&2
-      exit 1
-    fi
-
-    echo "version=$package_version" >> "$GITHUB_OUTPUT"
-```
-
-项目不是 Rust workspace, 或版本不在包 metadata 中时, 使用该生态的结构化 metadata 入口替换此步骤.
-
 ## 平台产物校验
 
-仅二进制/应用分发需要本节. GUI 程序不适合通过 `--version` 启动时, 检查文件格式和必要路径.
+仅二进制/应用分发需要本节. GUI 程序不适合通过 `--version` 启动时, 检查文件格式和必要路径. 各语言产物的路径模板与文件格式见语言模块.
 
 Unix runner 示例:
 
@@ -259,7 +220,7 @@ Unix runner 示例:
   shell: bash
   run: |
     set -euo pipefail
-    binary="target/TARGET/release/PROJECT"
+    binary="PROJECT_BINARY_PATH"
     test -x "$binary"
     file "$binary" | grep -q 'EXPECTED_FORMAT'
 ```
@@ -270,7 +231,7 @@ Windows runner 示例:
 - name: 校验 Windows 二进制文件
   shell: pwsh
   run: |
-    $binary = "target/TARGET/release/PROJECT.exe"
+    $binary = "PROJECT_BINARY_PATH"
     if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
       throw "缺少 Windows 二进制文件: $binary"
     }

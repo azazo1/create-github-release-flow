@@ -19,7 +19,7 @@ manual branch -> build matrix -> validate/package -> upload artifact
 manual tag -> validate version -> build matrix -> validate/package -> notes/checksums -> create/update release
 ```
 
-库分发 (Rust lib crate, 以及 Python package, npm package, Go module 等同类形式):
+库分发 (语言生态的包形式, 也就是 crate, package, module 这类可被依赖的单元):
 
 ```text
 release preparation -> write VERSION.md -> commit -> annotated tag from VERSION.md -> push
@@ -40,8 +40,21 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 先判断项目如何分发, 再读现有 CI 和脚本:
 
 - 二进制/应用: 用户从 GitHub Release 或安装包获取 CLI, TUI, GUI 或预编译归档. 使用下文的运行时版本号显示, 跨平台打包和 artifact 规则.
-- 库: 用户通过语言生态的包管理器获取, 例如 Rust lib crate, Python package, npm package, Go module. 不套用运行时版本号显示规则, 也不默认做跨平台二进制打包.
+- 库: 用户通过语言生态的包管理器获取, 也就是该语言的包形式 (crate, package, module 等). 不套用运行时版本号显示规则, 也不默认做跨平台二进制打包.
 - 混合项目只对实际以二进制方式分发的部分套用版本显示和打包规则. 判断以用户获取方式为准, 不要只看构建清单里有没有 bin 或 lib target.
+
+确定项目语言后读取对应模块. 版本读取命令, 版本注入机制, 依赖缓存, 平台目标与打包方式都在模块里, 不要凭记忆自行发明:
+
+| 语言 | 判定文件 | 模块 |
+| --- | --- | --- |
+| Go | `go.mod` | [langs/go.md](references/langs/go.md) |
+| Rust | `Cargo.toml` | [langs/rust.md](references/langs/rust.md) |
+| Node.js / TypeScript | `package.json` | [langs/node.md](references/langs/node.md) |
+| Python | `pyproject.toml`, `setup.py`, `requirements.txt` | [langs/python.md](references/langs/python.md) |
+| C# / .NET | `*.csproj`, `*.fsproj`, `*.sln` | [langs/dotnet.md](references/langs/dotnet.md) |
+
+- 混合项目按产物与业务边界分派: 客户端与服务端等独立产物各自按所在语言的模块处理并分别归档; 多语言通过库或依赖组合成单一最终产物时, 按产出该产物的语言处理, 其他语言只作为构建前置步骤.
+- 模块未覆盖的语言: 按各语言模块所用的同一套槽位 (分发判定, 版本来源, 版本注入, 缓存, 构建与测试, 平台目标, 归档, 包发布, 工具分工) 自行推导, 结论写进项目文档, 不要新增散落的文件.
 
 阅读项目说明, 现有 CI, task runner 和打包脚本, 确认:
 
@@ -51,7 +64,7 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 - branch, PR 和 tag 当前执行的 job.
 - release notes, changelog 和历史 release 的维护方式.
 - 二进制/应用: 二进制, 应用包和归档的输出路径; 各平台的编译 target, runner 和运行时兼容要求; CLI, TUI, GUI 等展示版本号的交互位置及其版本信息的生成方式.
-- 库: 包 metadata 中的版本字段, 现有测试矩阵, 以及是否已有 crates.io, PyPI, npm 等发布方式.
+- 库: 包 metadata 中的版本字段, 现有测试矩阵, 以及是否已有该生态的发布方式, 具体入口见语言模块.
 
 仅当项目以二进制/应用方式分发, 且 CLI, TUI, GUI 等可能展示版本号时, 发布构建产物中的这些交互位置 (如 `--version`, About 对话框) 必须显示当前构建版本并标注构建 commit:
 
@@ -64,9 +77,11 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 > 版本号显示必须自动生成, 而不是手动编辑写死.
 > 库分发不要把 git describe 或短 hash 写入包版本. 包版本保持 metadata 中的稳定版本, 由 tag 与其严格对齐.
 
-二进制/应用复制 [build-version.sh](references/build-version.sh) 和 [build-version.ps1](references/build-version.ps1) 到 `scripts/`, 按文件开头说明改占位符.
+二进制/应用复制 [build-version.sh](references/build-version.sh) 和 [build-version.ps1](references/build-version.ps1) 到项目的 `scripts/`, 再按语言模块给出的清单复制归档 helper [archive.sh](references/archive.sh) 与 [archive.ps1](references/archive.ps1), 以及该语言的 `dist.sh` / `dist.ps1`. 各文件按开头说明改占位符.
 
-版本自动嵌入逻辑 (如 Rust build script/vergen, Go `-ldflags -X`, CMake 构建期读取 git 等同类机制) 默认关闭, 只在发布构建路径通过显式开关 (如环境变量) 打开: 本地由 `just dist` 注入脚本结果, CI 用同一环境变量注入 `build_version`. 不要让普通开发构建无条件读取 `.git`, 否则每次 commit 都会使增量编译缓存失效, `target` 等构建目录持续膨胀.
+版本注入统一使用 `PROJECT_BUILD_VERSION` 环境变量, 归档命名统一由 `archive.sh` / `archive.ps1` 负责. 仓库一个版本 tag 都没有时, `build-version.sh` 需要调用方用 `PROJECT_PACKAGE_VERSION` 传入包版本, 读取命令见语言模块.
+
+版本自动嵌入逻辑默认关闭, 只在发布构建路径通过显式开关 (如环境变量) 打开: 本地由 `just dist` 注入脚本结果, CI 用同一环境变量注入 `build_version`, 具体注入机制见语言模块. 不要让普通开发构建无条件读取 `.git`, 否则每次 commit 都会使增量编译缓存失效, `target` 等构建目录持续膨胀.
 
 优先调用项目已有的 task runner 或打包脚本. 平台专用打包包含应用目录, 图标, metadata 或签名准备时, 将逻辑放在项目脚本中, 不要把完整实现内联到 workflow.
 
@@ -74,7 +89,7 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 
 桌面应用默认形态 (安装版) 就是 `just dist` 的产物. 只有当项目明确提供便携版形态时, 才额外新增同样不接受参数的 `just dist-portable`; 不要用参数或环境变量在两种形态之间切换, 也不要新增按平台命名的 recipe.
 
-二进制/应用示例, 为同一 `dist` recipe 添加互斥的平台属性, 并注入构建版本:
+二进制/应用示例, 为同一 `dist` recipe 添加互斥的平台属性, 并注入构建版本. `scripts/dist.sh` 与 `scripts/dist.ps1` 来自语言模块, 项目需要平台专用打包 (应用目录, 图标, 签名等) 时由脚本内部继续调用项目自己的打包脚本:
 
 ```justfile
 # 根据当前平台生成发布产物.
@@ -84,27 +99,27 @@ dist:
     $ErrorActionPreference = 'Stop'
     $version = (& 'scripts/build-version.ps1' | Out-String).Trim()
     $env:PROJECT_BUILD_VERSION = "v$version"
-    & 'scripts/dist-windows.ps1'
+    & 'scripts/dist.ps1'
     if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
 # 根据当前平台生成发布产物.
 [macos]
 dist:
-    PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" ./scripts/dist-macos.sh
+    PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
 
 # 根据当前平台生成发布产物.
 [linux]
 dist:
-    PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" ./scripts/dist-linux.sh
+    PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
 ```
 
-实现具体 YAML 片段时按需读取 [workflow-patterns.md](references/workflow-patterns.md), 不要一次性复制所有示例.
+实现具体 YAML 片段时按需读取 [workflow-patterns.md](references/workflow-patterns.md), 不要一次性复制所有示例. 语言相关的片段在语言模块里, 骨架库只放语言无关部分.
 
 ### 2. 组织 CI, tag 与手动触发
 
 根据项目惯例匹配 `v1.2.3` 或 `1.2.3` 等 tag. Tag pattern 只负责减少无效运行, workflow 内仍要严格校验版本.
 
-如果项目文件中保存版本号, 使用结构化 metadata 命令读取, 规范化 tag 后严格比较. Rust 项目优先使用 `cargo metadata --locked --no-deps --format-version 1`, 不要用文本正则读取 `Cargo.toml`. 如果 tag 是唯一版本来源, 不要额外维护第二份版本状态.
+如果项目文件中保存版本号, 使用结构化 metadata 命令读取, 规范化 tag 后严格比较, 具体命令见语言模块, 不要用文本正则读取清单文件. 如果 tag 是唯一版本来源, 不要额外维护第二份版本状态.
 
 添加 `workflow_dispatch` 和可选字符串 input `tag`. 空值表示对用户在 GitHub UI 或 API 中选择的 ref 运行 CI, 不创建 release; 二进制/应用会构建并上传 Actions artifact, 库分发默认只跑测试或编译检查, 不要为了形式上传空 artifact. 非空值表示发布该已有 tag. 不要让手动发布隐式使用触发 workflow 的 branch commit.
 
@@ -133,7 +148,7 @@ dist:
 
 构建或测试 job 应配置依赖与构建缓存, 但缓存只用于加速, 不能作为发布正确性来源:
 
-- 优先使用该语言或工具链已验证的专用缓存 action, 例如 setup action 内置缓存或社区广泛使用的专用 cache action.
+- 优先使用该语言或工具链已验证的专用缓存 action, 例如 setup action 内置缓存或社区广泛使用的专用 cache action, 具体机制见语言模块.
 - 没有可用专用机制时, 回退到 `actions/cache@v6`, 缓存路径覆盖包管理器缓存和构建缓存, 不缓存发布产物.
 - `actions/cache@v6` 的 key 包含 runner 系统, 矩阵架构和 lockfile hash, 并使用 `restore-keys` 回退; 不同平台和架构必须隔离.
 - 缓存 miss 或恢复失败不能导致构建失败, 干净环境必须能完整构建.
@@ -144,8 +159,8 @@ dist:
 - 不要求 `--version` smoke test.
 - CI 以测试, 类型检查和正式构建命令为主, 平台覆盖跟随项目现有测试需求.
 - 不要新增跨平台二进制归档, 不要上传发布用 artifact, 不要生成 SHA256SUMS.
-- 不要把自动生成的构建版本号写入 Cargo.toml, pyproject.toml, package.json 等包版本字段.
-- 若项目已有发布到 crates.io, PyPI, npm 等的脚本或 recipe, 优先复用; 不要在高权限 release job 里内联一套新的发布实现, 也不要为了 GitHub Release 再打一份库归档.
+- 不要把自动生成的构建版本号写入包版本字段, 字段名与所在文件见语言模块.
+- 若项目已有该生态的发布脚本或 recipe, 优先复用; 不要在高权限 release job 里内联一套新的发布实现, 也不要为了 GitHub Release 再打一份库归档.
 
 跨平台归档矩阵, 产物命名, SHA256SUMS 和 `just dist` 只适用于二进制/应用. 默认覆盖以下构建矩阵:
 
@@ -160,9 +175,10 @@ dist:
 
 桌面应用默认按安装版分发, 便携版只在项目明确提供该形态时才出产物. 安装布局, 安装器要求与自动更新落地方式见 desktop-app-skill.
 
-在实现时查阅 GitHub 官方 runner 文档, 确认当前可用的 runner 标签和仓库资格. 优先使用对应系统和架构的原生 runner. 无法原生构建时使用项目成熟的交叉编译工具链, 并明确 linker, sysroot 和系统库要求.
+在实现时查阅 GitHub 官方 runner 文档, 确认当前可用的 runner 标签和仓库资格. 优先使用对应系统和架构的原生 runner, 具体标签组合见语言模块. 无法原生构建时使用项目成熟的交叉编译工具链, 并明确 linker, sysroot 和系统库要求.
 
 > 注: 不要使用已经退役的 runner, 比如 macos-13-intel 等.
+> 注: 不要靠 `*-latest` 推断 CPU 架构: `ubuntu-latest` 是 x64, `macos-latest` 现在是 macOS 26 arm64, `macos-14` 已进入 deprecated. 需要特定架构时显式写标签, 例如 `ubuntu-24.04-arm`, `macos-15`, `macos-15-intel`, `windows-11-arm`.
 
 每个平台使用正式构建命令和 lockfile. 在归档前选择适合产物类型的最小校验:
 
@@ -210,17 +226,17 @@ git tag -a "v0.1.0" --cleanup=verbatim \
 
 必须使用 `--cleanup=verbatim`. Git 默认的 `strip` 模式会把 Markdown 中以 `#` 开头的标题当作注释移除. 不要再用 `-m` 单独维护另一份 tag 正文. 如果 tag 已存在或已推送, 不要直接覆盖, 应先报告 annotation 与版本文件不一致.
 
-从版本号同步, notes 文件, annotated tag 到 push 分支和 tag, 全程在一次提权中执行完毕, 不要逐步拆成多次提权. 实际操作是把版本号改动和 `docs/changelog/VERSION.md` 一起 stage 并 commit, 再用该文件创建 annotated tag, 最后 push 分支和 tag. 命令写成一条命令链, 每个 git 命令独占一行, 用 `&&` 连接, 例如版本存于 Cargo.toml 的项目发布 v0.1.0:
+从版本号同步, notes 文件, annotated tag 到 push 分支和 tag, 全程在一次提权中执行完毕, 不要逐步拆成多次提权. 实际操作是把版本号改动和 `docs/changelog/VERSION.md` 一起 stage 并 commit, 再用该文件创建 annotated tag, 最后 push 分支和 tag. 命令写成一条命令链, 每个 git 命令独占一行, 用 `&&` 连接, 例如发布 v0.1.0:
 
 ```shell
-git add Cargo.toml Cargo.lock docs/changelog/0.1.0.md &&
+git add PROJECT_VERSION_FILE PROJECT_LOCKFILE docs/changelog/0.1.0.md &&
 git commit -m "chore(release): v0.1.0" &&
 git tag -a "v0.1.0" --cleanup=verbatim -F "docs/changelog/0.1.0.md" &&
 git push origin main &&
 git push origin "v0.1.0"
 ```
 
-- `git add` 只 stage 版本号改动和对应 notes 文件, 版本文件按项目实际替换, 如 `pyproject.toml`, `package.json` 及各自 lockfile; tag 是唯一版本来源时只 add notes 文件.
+- `git add` 只 stage 版本号改动和对应 notes 文件, 版本文件与 lockfile 按项目实际替换 (文件名与字段见语言模块); tag 是唯一版本来源时只 add notes 文件.
 - commit message 跟随项目现有 release commit 风格, 不固定使用 `chore(release)`.
 - `git tag` 必须保持上文 annotated tag 形式, `--cleanup=verbatim` 和 `-F` 指向同一个 notes 文件.
 - 分支名以项目默认分支为准. 版本号尚未同步时, 同步 commit 就是这条链中的 commit, 不要拆到链外.
@@ -324,6 +340,7 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 13. 仅二进制/应用: 在精确 tag, 非 tag commit 和脏 HEAD 三种状态下, 检查 CLI/TUI/GUI 的版本显示符合约定; 日常开发构建显示 `dev-build`, 且构建脚本不会因 `.git` 变化触发重编. 库分发确认包版本仍是 metadata 中的稳定版本, 没有被写入 git hash.
 14. 确认缓存机制选择顺序正确, 专用缓存与项目实际匹配, 没有重复缓存同一路径, 且 fallback 缓存 miss 时仍能完整构建.
 15. 不需要在项目当中编写发布工作流的文档和发布新版本的操作说明, agent 通过阅读此 skill 可以重新获取相关信息. 也不需要发布新版本的 just recipe, 需要 agent 手动实现.
+16. 语言模块给出的 `dist.sh` / `dist.ps1` 与 `archive.sh` / `archive.ps1` 要真跑一次: 至少覆盖一个 Unix 平台与一个 Windows 平台, 断言产物命名符合约定, 且二进制报出的版本号与注入值一致; 没有条件跑的平台要明确标注未实证, 不要当作已验证.
 
 本地检查不能证明所有 GitHub hosted runner 均可用. 明确说明仍需通过真实 tag run 验证的 runner 资格, 平台依赖和发布权限.
 
@@ -333,6 +350,8 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 - 对 tag, 版本和路径变量加引号.
 - Bash 步骤使用 `set -euo pipefail`, 数组和 glob 同时处理空匹配.
 - PowerShell 步骤使用 `-LiteralPath` 并在缺少文件时抛出错误.
+- PowerShell 字符串里拼接后缀要写成 `"${Name}.exe"`, 不要写 `"$Name.exe"`, 后者会被当成属性访问并静默得到空串.
+- PowerShell 脚本里的 `param()` 必须是第一条语句, 前面只能有注释.
 - 多行正文通过文件传递, 不要写入普通单行环境变量.
 - 不要在高权限 release job 中构建或执行不可信代码.
 - 依赖和构建缓存只配置在低权限构建或测试 job, 不要在高权限 release job 中恢复或写入缓存.

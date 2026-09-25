@@ -1,0 +1,33 @@
+<Project>
+
+  <!-- 复制到项目根目录 Directory.Build.props, 通常不需要改动.
+       发行构建通过环境变量或 -p: 传入 PROJECT_BUILD_VERSION 注入版本号, 日常开发构建为 dev-build.
+       这里只影响程序集的信息版本, 不改动 Version, VersionPrefix 等 NuGet 包版本字段. -->
+
+  <PropertyGroup>
+    <BuildVersion Condition="'$(BuildVersion)' == '' and '$(PROJECT_BUILD_VERSION)' != ''">$(PROJECT_BUILD_VERSION)</BuildVersion>
+    <BuildVersion Condition="'$(BuildVersion)' == ''">dev-build</BuildVersion>
+    <!-- SDK 自带的信息版本属性会与本文件生成的重名, 关掉它. -->
+    <GenerateAssemblyInformationalVersionAttribute>false</GenerateAssemblyInformationalVersionAttribute>
+  </PropertyGroup>
+
+  <Target Name="GenerateBuildVersion" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <BuildVersionFile>$(IntermediateOutputPath)BuildVersion.g.cs</BuildVersionFile>
+    </PropertyGroup>
+    <ItemGroup>
+      <Compile Include="$(BuildVersionFile)" Visible="false" />
+      <FileWrites Include="$(BuildVersionFile)" />
+      <_BuildVersionLine Include="// 由 Directory.Build.props 生成, 不要手工编辑." />
+      <_BuildVersionLine Include="using System%3B" />
+      <_BuildVersionLine Include="[assembly: System.Reflection.AssemblyInformationalVersion(&quot;$(BuildVersion)&quot;)]" />
+    </ItemGroup>
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+    <WriteLinesToFile
+      File="$(BuildVersionFile)"
+      Lines="@(_BuildVersionLine)"
+      Overwrite="true"
+      WriteOnlyWhenDifferent="true" />
+  </Target>
+
+</Project>

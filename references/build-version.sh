@@ -2,9 +2,8 @@
 
 set -euo pipefail
 
-# 复制到项目 scripts/build-version.sh 后, 只改下面两个变量.
-# 非 Rust 项目再改 read_package_version, 不要改后面的 tag / dirty 算法.
-PACKAGE_NAME="PROJECT"
+# 复制到项目 scripts/build-version.sh 后, 通常只需要改 TAG_PREFIX.
+# 不要改后面的 tag / dirty 算法.
 TAG_PREFIX="v"
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -42,10 +41,18 @@ select_version_tag() {
   return 1
 }
 
-# 用该生态的结构化 metadata 读取稳定包版本, 不要正则扫清单文件.
+# 仓库一个版本 tag 都没有时的兜底版本号, 由调用方提供.
+# 各语言模块给出该生态的结构化 metadata 读取命令, 在 just dist 或 CI 里先算出包版本,
+# 再用 PROJECT_PACKAGE_VERSION 传进来; 不要在本脚本里正则扫清单文件.
 read_package_version() {
-  cargo metadata --locked --no-deps --format-version 1 |
-    jq -er --arg name "$PACKAGE_NAME" '.packages[] | select(.name == $name) | .version'
+  if [[ -n "${PROJECT_PACKAGE_VERSION:-}" ]]; then
+    printf '%s\n' "$PROJECT_PACKAGE_VERSION"
+    return 0
+  fi
+
+  echo "仓库里没有任何版本 tag, 且未提供 PROJECT_PACKAGE_VERSION" >&2
+  echo "请先打一个版本 tag, 或按语言模块给出的命令读出包版本后传入该变量" >&2
+  return 1
 }
 
 describe_latest_tag() {
@@ -65,8 +72,6 @@ strip_tag_prefix() {
   fi
 }
 
-fallback_tag="${TAG_PREFIX}$(read_package_version)"
-
 exact_tag=""
 if tags="$(git_output tag --points-at HEAD)"; then
   exact_tag="$(select_version_tag "$tags" || true)"
@@ -76,7 +81,9 @@ if [[ -n "$exact_tag" ]]; then
   tag="$exact_tag"
 else
   tag="$(describe_latest_tag || true)"
-  tag="${tag:-$fallback_tag}"
+  if [[ -z "$tag" ]]; then
+    tag="${TAG_PREFIX}$(read_package_version)"
+  fi
 fi
 
 commit="$(git_output rev-parse --short=7 HEAD || true)"

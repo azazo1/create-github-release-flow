@@ -1,9 +1,8 @@
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
 
-# 复制到项目 scripts/build-version.ps1 后, 只改下面两个变量.
-# 非 Rust 项目再改 Read-PackageVersion, 不要改后面的 tag / dirty 算法.
-$PackageName = "PROJECT"
+# 复制到项目 scripts/build-version.ps1 后, 通常只需要改 TagPrefix.
+# 不要改后面的 tag / dirty 算法.
 $TagPrefix = "v"
 
 $root = Split-Path -Parent $PSScriptRoot
@@ -46,16 +45,15 @@ function Select-VersionTag {
     return $lines | Select-Object -First 1
 }
 
-# 用该生态的结构化 metadata 读取稳定包版本, 不要正则扫清单文件.
+# 仓库一个版本 tag 都没有时的兜底版本号, 由调用方提供.
+# 各语言模块给出该生态的结构化 metadata 读取命令, 在 just dist 或 CI 里先算出包版本,
+# 再用 PROJECT_PACKAGE_VERSION 传进来.
 function Read-PackageVersion {
-    $metadata = cargo metadata --locked --no-deps --format-version 1 | Out-String | ConvertFrom-Json
-    $packageVersion = $metadata.packages |
-        Where-Object { $_.name -eq $PackageName } |
-        Select-Object -First 1 -ExpandProperty version
-    if (-not $packageVersion) {
-        throw "failed to resolve $PackageName version from cargo metadata"
+    if ($env:PROJECT_PACKAGE_VERSION) {
+        return $env:PROJECT_PACKAGE_VERSION
     }
-    return $packageVersion
+
+    throw "仓库里没有任何版本 tag, 且未提供 PROJECT_PACKAGE_VERSION; 请先打一个版本 tag, 或按语言模块给出的命令读出包版本后传入该变量"
 }
 
 function Get-LatestDescribedTag {
@@ -77,7 +75,6 @@ function Strip-TagPrefix {
     return $Display
 }
 
-$fallbackTag = "$TagPrefix$(Read-PackageVersion)"
 $exactTag = $null
 $tags = Get-GitOutput -GitArgs @("tag", "--points-at", "HEAD")
 if ($tags) {
@@ -91,7 +88,7 @@ if ($exactTag) {
     if ($described) {
         $tag = $described
     } else {
-        $tag = $fallbackTag
+        $tag = "$TagPrefix$(Read-PackageVersion)"
     }
 }
 
