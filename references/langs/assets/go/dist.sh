@@ -27,10 +27,14 @@ case "$arch" in
   arm64) arch="aarch64" ;;
 esac
 
+# 二进制内显示的版本跟随 tag 样式, 通常带 v 前缀.
 version="${PROJECT_BUILD_VERSION:-}"
 if [[ -z "$version" ]]; then
   version="v$(bash scripts/build-version.sh)"
 fi
+
+# 产物名里的版本段去掉 v 前缀, 与 PROJECT-VERSION-PLATFORM-ARCH 的命名示例保持一致.
+archive_version="${version#v}"
 
 echo "构建 $PROJECT_NAME $version ($platform-$arch)"
 
@@ -59,7 +63,7 @@ fi
 echo "版本号校验通过: $version"
 
 PROJECT_NAME="$PROJECT_NAME" \
-PROJECT_BUILD_VERSION="$version" \
+PROJECT_BUILD_VERSION="$archive_version" \
 TARGET_PLATFORM="$platform" \
 TARGET_ARCH="$arch" \
   bash scripts/archive.sh "$staging" "$binary"

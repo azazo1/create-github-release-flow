@@ -77,9 +77,13 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 > 版本号显示必须自动生成, 而不是手动编辑写死.
 > 库分发不要把 git describe 或短 hash 写入包版本. 包版本保持 metadata 中的稳定版本, 由 tag 与其严格对齐.
 
-二进制/应用复制 [build-version.sh](references/build-version.sh) 和 [build-version.ps1](references/build-version.ps1) 到项目的 `scripts/`, 再按语言模块给出的清单复制归档 helper [archive.sh](references/archive.sh) 与 [archive.ps1](references/archive.ps1), 以及该语言的 `dist.sh` / `dist.ps1`. 各文件按开头说明改占位符.
+二进制/应用复制 [build-version.sh](references/build-version.sh) 和 [build-version.ps1](references/build-version.ps1) 到项目的 `scripts/`, 再按语言模块给出的清单复制归档 helper [archive.sh](references/archive.sh) 与 [archive.ps1](references/archive.ps1), 以及该语言的 `dist.sh` / `dist.ps1`. 各文件按开头说明改占位符, 复制后修正权限位 (`chmod 755 scripts/*.sh` 与 `chmod 644 scripts/*.ps1`), 否则脚本直接执行会失败.
 
-版本注入统一使用 `PROJECT_BUILD_VERSION` 环境变量, 归档命名统一由 `archive.sh` / `archive.ps1` 负责. 仓库一个版本 tag 都没有时, `build-version.sh` 需要调用方用 `PROJECT_PACKAGE_VERSION` 传入包版本, 读取命令见语言模块.
+版本注入统一使用 `PROJECT_BUILD_VERSION` 环境变量, 归档命名统一由 `archive.sh` / `archive.ps1` 负责:
+
+- **二进制内显示的版本**跟随 tag 样式, 通常带 `v` 前缀, 例如 `v1.2.3`, 非 tag commit 为 `v1.2.3-a1b2c3d`.
+- **产物名与 artifact 名的版本段不带 `v`**: `dist.sh` / `dist.ps1` 会剥掉前缀再交给归档 helper, 于是得到 `project-1.2.3-linux-x86_64.tar.gz`, 而不是 `project-v1.2.3-...`.
+- 仓库一个版本 tag 都没有时, `build-version.sh` 需要调用方用 `PROJECT_PACKAGE_VERSION` 传入包版本, 读取命令见语言模块. tag 是唯一版本来源的语言 (Go) 没有包版本可读, 这类项目必须先打第一个 tag, 否则 `just dist` 直接失败.
 
 版本自动嵌入逻辑默认关闭, 只在发布构建路径通过显式开关 (如环境变量) 打开: 本地由 `just dist` 注入脚本结果, CI 用同一环境变量注入 `build_version`, 具体注入机制见语言模块. 不要让普通开发构建无条件读取 `.git`, 否则每次 commit 都会使增量编译缓存失效, `target` 等构建目录持续膨胀.
 
@@ -112,6 +116,8 @@ dist:
 dist:
     PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
 ```
+
+`dist` 用的平台属性 (`[macos]` / `[linux]` / `[windows]`) 与 `[script(...)]` 需要较新的 just (实测 1.58 可用). just 版本过旧时会报未知属性, 此时改用 shebang recipe 在脚本内判断平台.
 
 实现具体 YAML 片段时按需读取 [workflow-patterns.md](references/workflow-patterns.md), 不要一次性复制所有示例. 语言相关的片段在语言模块里, 骨架库只放语言无关部分.
 
@@ -193,7 +199,7 @@ dist:
 
 不要为了形式统一而强行执行会启动 GUI, 后台服务或交互流程的二进制.
 
-产物名使用统一格式:
+产物名使用统一格式 (VERSION 段不带 `v` 前缀, 与二进制内显示的版本样式不同, 见第 1 节 `PROJECT_BUILD_VERSION` 的说明):
 
 ```text
 PROJECT-VERSION-PLATFORM-ARCH[-VARIANT].EXT
@@ -242,6 +248,8 @@ git push origin "v0.1.0"
 - 分支名以项目默认分支为准. 版本号尚未同步时, 同步 commit 就是这条链中的 commit, 不要拆到链外.
 
 提权前完成全部检查并确认 annotation 与版本文件一致, 提权执行中只包含这条 git 命令链, 不混入其他任务.
+
+这条链连同链尾的两条 `git push` 必须在同一次提权里一次走完, 不要拆成多次执行. 提权前先把版本号, notes 文件与 tag annotation 全部确认好, 因为它们在同一条链里落地.
 
 人工说明需要覆盖用户可见变化, 兼容性影响和升级操作. 只记录相对上一个发布版本形成净变化的用户可见内容. 库分发侧重 API, 兼容性和迁移; 没有安装包时, Upgrade Notes 写依赖版本和 API 迁移即可, 不要按二进制安装包的口吻写升级步骤. 如果某个改动在区间内被加入后又移除, 且当前版本相对上一个发布版本没有任何可观察差异, 则该改动完全透明, changelog 不需要体现. 文件缺失或为空时发布直接失败. 使用以下模板, 只保留实际有内容的 section:
 
@@ -340,9 +348,9 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 13. 仅二进制/应用: 在精确 tag, 非 tag commit 和脏 HEAD 三种状态下, 检查 CLI/TUI/GUI 的版本显示符合约定; 日常开发构建显示 `dev-build`, 且构建脚本不会因 `.git` 变化触发重编. 库分发确认包版本仍是 metadata 中的稳定版本, 没有被写入 git hash.
 14. 确认缓存机制选择顺序正确, 专用缓存与项目实际匹配, 没有重复缓存同一路径, 且 fallback 缓存 miss 时仍能完整构建.
 15. 不需要在项目当中编写发布工作流的文档和发布新版本的操作说明, agent 通过阅读此 skill 可以重新获取相关信息. 也不需要发布新版本的 just recipe, 需要 agent 手动实现.
-16. 语言模块给出的 `dist.sh` / `dist.ps1` 与 `archive.sh` / `archive.ps1` 要真跑一次: 至少覆盖一个 Unix 平台与一个 Windows 平台, 断言产物命名符合约定, 且二进制报出的版本号与注入值一致; 没有条件跑的平台要明确标注未实证, 不要当作已验证.
+16. 语言模块给出的 `dist.sh` / `dist.ps1` 与 `archive.sh` / `archive.ps1` 要真跑一次: 至少覆盖一个 Unix 平台与一个 Windows 平台, 断言产物命名符合约定, 且二进制报出的版本号与注入值一致. 无法本地跑的平台按 [pending-verification.md](references/pending-verification.md) 的替代路径处理.
 
-本地检查不能证明所有 GitHub hosted runner 均可用. 明确说明仍需通过真实 tag run 验证的 runner 资格, 平台依赖和发布权限.
+本地检查不能证明所有 GitHub hosted runner 均可用. 待验证事项, 无法本地实证时的替代路径, 环境漂移与发布序列的历史遗留统一记录在 [pending-verification.md](references/pending-verification.md), 本文件不再重复罗列.
 
 ## 实现约束
 

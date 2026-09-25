@@ -25,9 +25,16 @@ try {
         "arm64" { $arch = "aarch64" }
     }
 
+    # 二进制内显示的版本跟随 tag 样式, 通常带 v 前缀.
     $version = $env:PROJECT_BUILD_VERSION
     if (-not $version) {
         $version = "v$(& 'scripts/build-version.ps1' | Out-String).Trim()"
+    }
+
+    # 产物名里的版本段去掉 v 前缀, 与 PROJECT-VERSION-PLATFORM-ARCH 的命名示例保持一致.
+    $archiveVersion = $version
+    if ($archiveVersion.StartsWith("v")) {
+        $archiveVersion = $archiveVersion.Substring(1)
     }
 
     Write-Host "构建 $ProjectName $version ($platform-$arch)"
@@ -51,7 +58,7 @@ try {
     Write-Host "版本号校验通过: $version"
 
     $env:PROJECT_NAME = $ProjectName
-    $env:PROJECT_BUILD_VERSION = $version
+    $env:PROJECT_BUILD_VERSION = $archiveVersion
     $env:TARGET_PLATFORM = $platform
     $env:TARGET_ARCH = $arch
     & 'scripts/archive.ps1' -Staging $staging $binary

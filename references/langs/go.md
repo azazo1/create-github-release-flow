@@ -60,6 +60,7 @@ go build -trimpath \
 - 注入路径是完整的包导入路径, 用 `go list -m` 取模块名, 不要手写, 重命名模块时会静默失效.
 - `version` 变量必须是变量而不是常量, 常量无法在链接期覆盖.
 - 日常开发构建不设置 `PROJECT_BUILD_VERSION`, 显示 `dev-build`.
+- `just dist` 与 CI 都传带 `v` 前缀的值 (二进制内显示跟随 tag 样式); 产物名里的 `v` 由 `dist.sh` / `dist.ps1` 剥掉, 调用方不用管.
 - 不要用 `debug.ReadBuildInfo()` 的 vcs 信息拼版本号: `-buildvcs=false` 或非 git 构建时它缺失, 而且会把哈希带进正式产物.
 - 注入失效时 `-X` 不报错, 所以构建后必须冒烟断言一次.
 
@@ -99,6 +100,7 @@ gofmt -l .          # 只报告不修改
 - lockfile 是 `go.sum`, 依赖整理用 `go mod tidy` 并提交结果.
 - 需要额外静态检查时固定工具版本 (例如 `go install honnef.co/go/tools/cmd/staticcheck@<version>`), 不要用浮动版本.
 - CI 里的格式检查必须只报告, 不要自动改写工作区.
+- 矩阵覆盖 Windows 时测试本身也要跨平台: 不要依赖 Unix 语义, 例如 `HOME` (Windows 的 `os.UserHomeDir()` 读 `USERPROFILE`) 与硬编码的 `/tmp` (会被解析成当前盘符). 路径断言优先用 `t.TempDir()` 与 `filepath.Join`.
 
 ## 平台目标与 runner
 
@@ -112,7 +114,7 @@ gofmt -l .          # 只报告不修改
 | Windows | aarch64 | `windows-11-arm` | `windows`/`arm64` | `.zip` |
 
 - 用原生 runner 而不是交叉编译: 冒烟检查要真正执行产物, 交叉编译的产物在 runner 上跑不起来. Go 交叉编译本身很容易, 但只能做文件格式检查.
-- 该标签组合已在真实仓库 (dida-cli) 全绿, 仍然要在实现时按 SKILL.md 要求复核 runner 文档.
+- 该标签组合已在真实仓库 (dida-cli) 全绿, 但 runner 资格, 镜像漂移与平台依赖只能在真实 run 上确认, 见 [pending-verification.md](../pending-verification.md).
 - 归档名里的平台与架构 token 用 `macos`, `x86_64`, `aarch64` 这类通用写法, 不要把 `darwin` 与 `arm64` 直接写进产物名.
 
 ```yaml
@@ -144,7 +146,7 @@ strategy:
 
 复制 [assets/go/dist.sh](assets/go/dist.sh) 到项目的 `scripts/dist.sh`, 同时复制 [../archive.sh](../archive.sh) 与 [../build-version.sh](../build-version.sh); Windows 侧对应复制 [assets/go/dist.ps1](assets/go/dist.ps1), [../archive.ps1](../archive.ps1), [../build-version.ps1](../build-version.ps1).
 
-`dist.sh` 只改顶部几个常量: `PROJECT_NAME`, `MAIN_PACKAGE`, `BINARY_NAME`, `SMOKE_ARGS`. 它负责构建, 冒烟断言版本号, 然后交给 `archive.sh` 拼名字并压缩.
+`dist.sh` 只改顶部几个常量: `PROJECT_NAME`, `MAIN_PACKAGE`, `BINARY_NAME`, `SMOKE_ARGS`. 它负责构建, 冒烟断言版本号, 然后交给 `archive.sh` 拼名字并压缩. 归档用的版本段已在脚本内部剥掉 `v` 前缀, 所以产物名形如 `dida-0.1.2-linux-x86_64.tar.gz`, 而二进制内显示的是 `v0.1.2`; 两者样式不同是刻意的, 不要为了统一去改这段逻辑.
 
 `justfile` 保持一个不接受参数的 `dist`:
 
@@ -195,3 +197,4 @@ goreleaser 可以承担 deb/rpm, Homebrew tap, scoop 这类分发产物, 但必�
 - Windows 产物要带 `.exe` 后缀并打 `zip`, 命名仍用 `windows` 与 `x86_64` 这样的 token.
 - `macos-15` 是 arm64, `macos-15-intel` 才是 x86_64; `macos-latest` 现在是 macOS 26 arm64, `ubuntu-latest` 是 x64, 不要靠 `*-latest` 猜架构.
 - 构建期不要读取 `.git`: Go 的 `-buildvcs` 与自定义版本注入都会让构建结果随 commit 变化, 增量缓存跟着失效.
+- Windows runner 上跑 `gofmt -l .` 之前必须让仓库统一 LF 行尾: Git for Windows 默认 `core.autocrlf=true`, 检出时会把文本文件转成 CRLF, 于是 gofmt 把所有 `.go` 文件都判为未格式化 (实测整个仓库全被列出). 在 `.gitattributes` 里声明 `* text=auto eol=lf` 即可解决, 不要用"Windows 上跳过格式检查"来回避.

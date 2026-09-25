@@ -101,7 +101,7 @@ cargo fmt --check        # 只报告不修改
 
 - 优先用原生 runner 出产物, 交叉编译只在确实没有对应 runner 时使用.
 - musl 目标需要额外工具链: 用 `cross` 容器化构建, 或在 runner 上安装 `musl-tools` 与对应 linker.
-- `windows-11-arm` 镜像带 `Microsoft.VisualStudio.Component.VC.Tools.ARM64`, 所以 `aarch64-pc-windows-msvc` 可以在该 runner 上原生链接; 仍要在实现时复核 runner 文档.
+- `windows-11-arm` 镜像带 `Microsoft.VisualStudio.Component.VC.Tools.ARM64`, 所以 `aarch64-pc-windows-msvc` 可以在该 runner 上原生链接; runner 资格与镜像漂移见 [pending-verification.md](../pending-verification.md).
 - 需要静态产物时优先 musl, 不要把 GNU 动态链接产物描述为通用静态二进制.
 
 ## 归档与打包
