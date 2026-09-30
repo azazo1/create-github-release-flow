@@ -41,6 +41,7 @@
 - 版本在 `dynamic` 里时, 改为读取构建产物 metadata: `python -c 'import importlib.metadata as m; print(m.version("PROJECT"))'`, 并确认它与 tag 对齐.
 - 库分发的版本必须是 PyPI 接受的稳定版本号, 不要用 `+<hash>` 本地版本段表达开发状态.
 - 不要为了统一版本号在构建脚本里改写 `pyproject.toml`.
+- 仓库还没有版本 tag 时 (首个 tag 之前), 同一条读取命令要再喂给 `build-version.sh`: 在 `just dist` 的 recipe 与 workflow 的 `解析构建版本` 步骤里把它作为 `PROJECT_PACKAGE_VERSION` 传入, 得到 `0.4.2-<短 hash>` 这样的兜底版本号, 首个 tag 之前的 branch 与 PR 运行才不会因为缺少版本号而失败.
 
 ## 版本注入与运行时显示
 
@@ -108,7 +109,8 @@ uv build
 - `ENTRY` 必须指向绝对导入的启动脚本 (`scripts/entry.py`), 不能指向包内的 `__main__.py`: 后者由 `python -m` 执行时相对导入成立, 被 PyInstaller 当作顶层 `__main__` 执行时必然报 `ImportError: attempted relative import with no known parent package`. 已经实测踩过这一次.
 - `PACKAGE_PATH` 是包所在的那一层目录 (通常 `src`), 交给 PyInstaller 的 `--paths` 解析绝对导入.
 - `BUILD_MODE=pyinstaller` 是生产推荐路径, 需要环境中已安装 PyInstaller; `BUILD_MODE=zipapp` 只用标准库, 但仅适用于 Unix, 适合快速验证与内部工具, 它需要 `ZIPAPP_SOURCE` (包含包目录的那一层) 与 `ZIPAPP_MAIN` (形如 `<包名>.__main__:main`).
-- `justfile` 的 `dist` 与 Go 模块给出的形状一致, 只把构建命令换成打包命令.
+- `justfile` 的 `dist` 与 Go 模块给出的形状一致, 只把构建命令换成打包命令, 并把 recipe 里的 `PROJECT_PACKAGE_VERSION` 换成上面给出的包版本读取命令.
+- 不经 `just dist` 直接跑 `scripts/dist.sh` 时, 仓库还没有 tag 的情况下同样要带上 `PROJECT_PACKAGE_VERSION`, 否则脚本内部兜底会失败.
 - 归档内容只放可执行产物, 不要打包整个虚拟环境.
 
 ## 生态包发布

@@ -21,6 +21,8 @@
 - tag 必须以项目约定的前缀开头 (通常 `v`).
 - `docs/changelog/<version>.md` 存在且非空.
 
+仓库还没有版本 tag 时没有包版本可读, `build-version.sh` 只能用占位版本: 首个 tag 之前, CI 的 `解析构建版本` 步骤与 `just dist` 都传 `PROJECT_PACKAGE_VERSION=0.0.0`, 得到 `0.0.0-<短 hash>` 这样的兜底版本号, 于是 branch 与 PR 运行不会因为缺版本号失败. 首个 tag 推送后正式版本由 tag 提供, 不要在项目里长期维护这份占位版本号.
+
 主版本号大于等于 2 时, `go.mod` 的 module path 必须以 `/v2` 这类后缀结尾, 并且 tag 写作 `v2.x.y`, 否则 `go get` 无法解析.
 
 ```yaml
@@ -154,22 +156,25 @@ strategy:
 # 根据当前平台生成发布产物.
 [macos]
 dist:
-    PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
+    PROJECT_PACKAGE_VERSION="0.0.0" PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
 
 # 根据当前平台生成发布产物.
 [linux]
 dist:
-    PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
+    PROJECT_PACKAGE_VERSION="0.0.0" PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
 
 # 根据当前平台生成发布产物.
 [windows]
 [script('powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File')]
 dist:
     $ErrorActionPreference = 'Stop'
+    $env:PROJECT_PACKAGE_VERSION = "0.0.0"
     $env:PROJECT_BUILD_VERSION = "v$(& 'scripts/build-version.ps1' | Out-String).Trim()"
     & 'scripts/dist.ps1'
     if ($LASTEXITCODE) { exit $LASTEXITCODE }
 ```
+
+不经 `just dist` 直接跑 `scripts/dist.sh` 时, 仓库还没有 tag 的情况下同样要带上 `PROJECT_PACKAGE_VERSION=0.0.0`, 否则脚本内部兜底会失败.
 
 归档内容只放二进制本身, 需要时附加 `README.md` 与 `LICENSE`, 不要塞入 `go.mod` 或源码.
 

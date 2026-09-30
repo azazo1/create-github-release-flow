@@ -39,6 +39,11 @@
 - workspaces 或 monorepo 里对每个要发布的包各读一次 `package.json`, 全部与 tag 对齐.
 - 库分发的包版本必须是稳定 SemVer, 不要把 commit 短 hash 写进 `version`.
 - 不要为了统一版本号在构建脚本里改写 `package.json`; 版本由发布准备阶段的提交决定.
+- 仓库还没有版本 tag 时 (首个 tag 之前), 同一条读取命令要再喂给 `build-version.sh`: 在 `just dist` 的 recipe 与 workflow 的 `解析构建版本` 步骤里把它作为 `PROJECT_PACKAGE_VERSION` 传入, 得到 `0.4.2-<短 hash>` 这样的兜底版本号, 首个 tag 之前的 branch 与 PR 运行才不会因为缺少版本号而失败.
+
+```shell
+PROJECT_PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+```
 
 ## 版本注入与运行时显示
 
@@ -109,7 +114,8 @@ pnpm run test
 
 - 只改顶部常量: `PROJECT_NAME`, `ENTRY`, `BINARY_NAME`, `SMOKE_ARGS`; 需要时用 `BUNDLER` 在 bun 与 esbuild 之间切换.
 - Windows 产物必须带 `.exe` 后缀并打成 `zip`, 命名里仍用 `windows-x86_64` 这类 token.
-- `justfile` 的 `dist` 与 Go 模块给出的形状一致, 只把构建命令换成打包命令.
+- `justfile` 的 `dist` 与 Go 模块给出的形状一致, 只把构建命令换成打包命令, 并把 recipe 里的 `PROJECT_PACKAGE_VERSION` 换成上面给出的包版本读取命令.
+- 不经 `just dist` 直接跑 `scripts/dist.sh` 时, 仓库还没有 tag 的情况下同样要带上 `PROJECT_PACKAGE_VERSION`, 否则脚本内部兜底会失败.
 - 归档内容只放可执行产物; 不要把 `node_modules` 打进去.
 
 ## 生态包发布

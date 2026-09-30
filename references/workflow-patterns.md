@@ -122,7 +122,11 @@ jobs:
             exit 0
           fi
 
-          echo "build_version=$(bash scripts/build-version.sh)" >> "$GITHUB_OUTPUT"
+          # 仓库还没有版本 tag 时 (首个 tag 之前) build-version.sh 取不到基础版本号, 需要包版本兜底.
+          # 读取命令按语言模块给出的结构化 metadata 命令填写, 例如 package.json, Cargo.toml,
+          # pyproject.toml 或 csproj; Go 没有包版本可读, 按 go 模块写占位版本.
+          package_version="$(PROJECT_PACKAGE_VERSION_COMMAND)"
+          echo "build_version=$(PROJECT_PACKAGE_VERSION="$package_version" bash scripts/build-version.sh)" >> "$GITHUB_OUTPUT"
 
   build:
     needs: version
@@ -168,7 +172,7 @@ jobs:
           fetch-depth: 0
 ```
 
-没有 tag 时 `version` job 可以成功完成但不产生 version output. 只在 `is_release` 条件的步骤和 job 中消费该 output. 二进制/应用的打包和 artifact 上传不要再加 `is_release` 或 `workflow_dispatch` 条件, 非 release 产物用 `build_version` 命名, 平台相关产物的 Actions artifact 名也要带上这个版本号以及 platform 和 arch (桌面应用还要带上形态变体段), 平台无关的托管运行时产物 (如 .NET dll, Java jar) 按其自身规则命名, 不加 platform 和 arch. 库分发省略打包, artifact 上传和 SHA256SUMS 步骤, 矩阵按测试需求覆盖. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout.
+没有 tag 时 `version` output 不存在, 但 `version` job 仍要成功完成: `build_version` 始终有值, 仓库一个版本 tag 都没有时由包版本加短 hash 兜底, 所以首个 tag 之前的 branch 与 PR 运行也能构建和上传 artifact. 只在 `is_release` 条件的步骤和 job 中消费 `version` output. 二进制/应用的打包和 artifact 上传不要再加 `is_release` 或 `workflow_dispatch` 条件, 非 release 产物用 `build_version` 命名, 平台相关产物的 Actions artifact 名也要带上这个版本号以及 platform 和 arch (桌面应用还要带上形态变体段), 平台无关的托管运行时产物 (如 .NET dll, Java jar) 按其自身规则命名, 不加 platform 和 arch. 库分发省略打包, artifact 上传和 SHA256SUMS 步骤, 矩阵按测试需求覆盖. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout.
 
 ## 依赖与构建缓存
 

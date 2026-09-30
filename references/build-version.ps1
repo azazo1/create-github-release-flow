@@ -35,25 +35,75 @@ function Select-VersionTag {
     )
 
     $lines = $Tags -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
-    if ($TagPrefix) {
-        $prefixed = $lines | Where-Object { $_.StartsWith($TagPrefix) } | Select-Object -First 1
-        if ($prefixed) {
-            return $prefixed
+    foreach ($line in $lines) {
+        # 与 describe 的 --match 保持一致: 设了 TagPrefix 时只接受带前缀的 tag.
+        if (-not $TagPrefix -or $line.StartsWith($TagPrefix)) {
+            return $line
         }
     }
 
-    return $lines | Select-Object -First 1
+    return $null
 }
 
-# 仓库一个版本 tag 都没有时的兜底版本号, 由调用方提供.
+# 包版本可能已经带上 tag 前缀 (调用方直接传了 v0.1.0), 统一剥掉, 避免拼出双前缀.
+function Normalize-PackageVersion {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Version
+    )
+
+    if ($TagPrefix -and $Version.StartsWith($TagPrefix)) {
+        return $Version.Substring($TagPrefix.Length)
+    }
+    return $Version
+}
+
+# 取不到版本 tag 时说明具体原因, 区分"仓库确实没有 tag", "有 tag 但没一个匹配 TagPrefix"
+# 和"本地没有 tag 对象 (浅克隆或没 fetch tags)"三种情况.
+function Get-MissingTagReason {
+    $allTags = Get-GitOutput -GitArgs @("tag", "--list")
+    if ($TagPrefix) {
+        $matchedTags = Get-GitOutput -GitArgs @("tag", "--list", "$TagPrefix*")
+    } else {
+        $matchedTags = $allTags
+    }
+
+    $firstTag = $null
+    if ($allTags) {
+        $firstTag = ($allTags -split "`n" | Where-Object { $_.Trim() -ne "" } | Select-Object -First 1)
+    }
+    $firstMatched = $null
+    if ($matchedTags) {
+        $firstMatched = ($matchedTags -split "`n" | Where-Object { $_.Trim() -ne "" } | Select-Object -First 1)
+    }
+
+    $shallow = (Get-GitOutput -GitArgs @("rev-parse", "--is-shallow-repository")) -eq "true"
+
+    if (-not $firstMatched -and $shallow) {
+        return "本地是浅克隆, 取不到远端 tag"
+    }
+    if (-not $firstTag) {
+        return "仓库里没有任何 tag"
+    }
+    if (-not $firstMatched) {
+        return "本地 tag 没有一个匹配 TagPrefix=$TagPrefix (现有第一个 tag 是 $firstTag)"
+    }
+    return "本地有版本 tag ($firstMatched), 但 describe 从 HEAD 取不到它"
+}
+
+# 仓库还没有任何版本 tag 时的兜底基础版本号, 由调用方提供.
 # 各语言模块给出该生态的结构化 metadata 读取命令, 在 just dist 或 CI 里先算出包版本,
 # 再用 PROJECT_PACKAGE_VERSION 传进来.
 function Read-PackageVersion {
-    if ($env:PROJECT_PACKAGE_VERSION) {
-        return $env:PROJECT_PACKAGE_VERSION
+    $reason = Get-MissingTagReason
+
+    if (-not $env:PROJECT_PACKAGE_VERSION) {
+        throw "$reason, 且未提供 PROJECT_PACKAGE_VERSION; 按语言模块给出的结构化命令读出包版本后传给 PROJECT_PACKAGE_VERSION, 或先打一个版本 tag (检查 TagPrefix 前缀, 浅克隆要 fetch tags)"
     }
 
-    throw "仓库里没有任何版本 tag, 且未提供 PROJECT_PACKAGE_VERSION; 请先打一个版本 tag, 或按语言模块给出的命令读出包版本后传入该变量"
+    $normalized = Normalize-PackageVersion -Version $env:PROJECT_PACKAGE_VERSION
+    Write-Warning "$reason; 基础版本号改用包版本 $normalized 加短 hash"
+    return $normalized
 }
 
 function Get-LatestDescribedTag {

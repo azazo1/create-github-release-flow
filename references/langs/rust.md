@@ -42,6 +42,7 @@ workspace 里要按包判断: `cargo metadata` 列出全部包, 逐个确认谁�
 - workspace 里同一仓库有多个包时, 对每个面向用户的包各读一次, 全部与 tag 对齐.
 - 只有 tag 是唯一版本来源的项目 (例如 workspace 里的应用 crate 不发布) 才跳过这一步, 改为只校验 tag 格式与 notes 文件存在.
 - 库分发的包版本必须是稳定版本号, 不要把 `git describe` 或短 hash 写进 `Cargo.toml`.
+- 仓库还没有版本 tag 时 (首个 tag 之前), 同一条 `cargo metadata` 命令要再喂给 `build-version.sh`: 在 `just dist` 的 recipe 与 workflow 的 `解析构建版本` 步骤里把求值结果作为 `PROJECT_PACKAGE_VERSION` 传入, 得到 `0.4.2-<短 hash>` 这样的兜底版本号, 首个 tag 之前的 branch 与 PR 运行才不会因为缺少版本号而失败.
 
 ## 版本注入与运行时显示
 
@@ -110,7 +111,8 @@ cargo fmt --check        # 只报告不修改
 
 - `dist.sh` 只改顶部常量: `PROJECT_NAME`, `BINARY_NAME`, `SMOKE_ARGS`.
 - 需要交叉编译时设置 `RUST_TARGET`, 并用 `TARGET_PLATFORM` / `TARGET_ARCH` 指定产物命名; 该分支跳过执行, 只做文件格式检查.
-- `justfile` 的 `dist` 与 Go 模块给出的形状一致 (单个不接受参数的 recipe, 用平台属性互斥), 只把构建命令换成 `cargo build --release --locked`.
+- `justfile` 的 `dist` 与 Go 模块给出的形状一致 (单个不接受参数的 recipe, 用平台属性互斥), 只把构建命令换成 `cargo build --release --locked`, 并把 recipe 里的 `PROJECT_PACKAGE_VERSION` 换成上面给出的包版本读取命令.
+- 不经 `just dist` 直接跑 `scripts/dist.sh` 时, 仓库还没有 tag 的情况下同样要带上 `PROJECT_PACKAGE_VERSION`, 否则脚本内部兜底会失败.
 - 归档内容只放二进制, 需要时附加 `README.md` 与 `LICENSE`.
 
 ## 生态包发布

@@ -24,16 +24,11 @@ git_output() {
 select_version_tag() {
   local tags="$1"
   local line
-  if [[ -n "$TAG_PREFIX" ]]; then
-    while IFS= read -r line; do
-      if [[ "$line" == "$TAG_PREFIX"* ]]; then
-        printf '%s\n' "$line"
-        return 0
-      fi
-    done <<< "$tags"
-  fi
   while IFS= read -r line; do
-    if [[ -n "$line" ]]; then
+    [[ -n "$line" ]] || continue
+    # 与 describe 的 --match 保持一致: 设了 TAG_PREFIX 时只接受带前缀的 tag,
+    # 免得同一个 tag 在 HEAD 上被当成版本号, 不在 HEAD 上却解析失败.
+    if [[ -z "$TAG_PREFIX" || "$line" == "$TAG_PREFIX"* ]]; then
       printf '%s\n' "$line"
       return 0
     fi
@@ -41,18 +36,62 @@ select_version_tag() {
   return 1
 }
 
-# 仓库一个版本 tag 都没有时的兜底版本号, 由调用方提供.
+# 包版本可能已经带上 tag 前缀 (调用方直接传了 v0.1.0), 统一剥掉, 避免拼出双前缀.
+normalize_package_version() {
+  local version="$1"
+  if [[ -n "$TAG_PREFIX" && "$version" == "$TAG_PREFIX"* ]]; then
+    printf '%s\n' "${version#"$TAG_PREFIX"}"
+  else
+    printf '%s\n' "$version"
+  fi
+}
+
+# 取不到版本 tag 时说明具体原因, 区分"仓库确实没有 tag", "有 tag 但没一个匹配 TAG_PREFIX"
+# 和"本地没有 tag 对象 (浅克隆或没 fetch tags)"三种情况.
+diagnose_missing_tag() {
+  local all_tags matched_tags first_tag first_matched
+  all_tags="$(git_output tag --list || true)"
+  if [[ -n "$TAG_PREFIX" ]]; then
+    matched_tags="$(git_output tag --list "${TAG_PREFIX}*" || true)"
+  else
+    matched_tags="$all_tags"
+  fi
+
+  first_tag=""
+  if [[ -n "$all_tags" ]]; then
+    first_tag="$(printf '%s\n' "$all_tags" | head -n 1)"
+  fi
+  first_matched=""
+  if [[ -n "$matched_tags" ]]; then
+    first_matched="$(printf '%s\n' "$matched_tags" | head -n 1)"
+  fi
+
+  if [[ -z "$first_matched" && "$(git rev-parse --is-shallow-repository 2>/dev/null || true)" == "true" ]]; then
+    printf '本地是浅克隆, 取不到远端 tag'
+  elif [[ -z "$first_tag" ]]; then
+    printf '仓库里没有任何 tag'
+  elif [[ -z "$first_matched" ]]; then
+    printf '本地 tag 没有一个匹配 TAG_PREFIX=%s (现有第一个 tag 是 %s)' "$TAG_PREFIX" "$first_tag"
+  else
+    printf '本地有版本 tag (%s), 但 describe 从 HEAD 取不到它' "$first_matched"
+  fi
+}
+
+# 仓库还没有任何版本 tag 时的兜底基础版本号, 由调用方提供.
 # 各语言模块给出该生态的结构化 metadata 读取命令, 在 just dist 或 CI 里先算出包版本,
 # 再用 PROJECT_PACKAGE_VERSION 传进来; 不要在本脚本里正则扫清单文件.
 read_package_version() {
-  if [[ -n "${PROJECT_PACKAGE_VERSION:-}" ]]; then
-    printf '%s\n' "$PROJECT_PACKAGE_VERSION"
-    return 0
+  local reason
+  reason="$(diagnose_missing_tag)"
+
+  if [[ -z "${PROJECT_PACKAGE_VERSION:-}" ]]; then
+    echo "${reason}, 且未提供 PROJECT_PACKAGE_VERSION" >&2
+    echo "按语言模块给出的结构化命令读出包版本后传给 PROJECT_PACKAGE_VERSION, 或先打一个版本 tag (检查 TAG_PREFIX 前缀, 浅克隆要 fetch tags)" >&2
+    return 1
   fi
 
-  echo "仓库里没有任何版本 tag, 且未提供 PROJECT_PACKAGE_VERSION" >&2
-  echo "请先打一个版本 tag, 或按语言模块给出的命令读出包版本后传入该变量" >&2
-  return 1
+  echo "警告: ${reason}; 基础版本号改用包版本 $(normalize_package_version "$PROJECT_PACKAGE_VERSION") 加短 hash" >&2
+  normalize_package_version "$PROJECT_PACKAGE_VERSION"
 }
 
 describe_latest_tag() {

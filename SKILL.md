@@ -72,6 +72,7 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 - 构建处于非 tag commit 时, 在最近一个版本 tag 后追加 `-` 和 7 位短 hash, 例如 `v1.2.3-a1b2c3d`.
 - HEAD 工作区有未提交改动时, 改用 `^` 分隔, 例如 `v1.2.3^a1b2c3d`.
 - 基础版本号样式跟随最近一个版本 tag, 不要固定假设带 `v` 前缀或三段式 SemVer.
+- 仓库还没有任何版本 tag 时 (首个 tag 之前), 基础版本号取包版本, Go 这类没有包版本的项目取占位版本 `0.0.0`, 见下文 `PROJECT_PACKAGE_VERSION` 的说明.
 - 日常开发构建 (不经 `just dist` 或 CI 的直接构建) 不注入版本信息, 版本号显示 `dev-build`.
 
 > 版本号显示必须自动生成, 而不是手动编辑写死.
@@ -83,9 +84,9 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 
 - **二进制内显示的版本**跟随 tag 样式, 通常带 `v` 前缀, 例如 `v1.2.3`, 非 tag commit 为 `v1.2.3-a1b2c3d`.
 - **产物名与 artifact 名的版本段不带 `v`**: `dist.sh` / `dist.ps1` 会剥掉前缀再交给归档 helper, 于是得到 `project-1.2.3-linux-x86_64.tar.gz`, 而不是 `project-v1.2.3-...`.
-- 仓库一个版本 tag 都没有时, `build-version.sh` 需要调用方用 `PROJECT_PACKAGE_VERSION` 传入包版本, 读取命令见语言模块. tag 是唯一版本来源的语言 (Go) 没有包版本可读, 这类项目必须先打第一个 tag, 否则 `just dist` 直接失败.
+- 仓库一个版本 tag 都没有时 (首个 tag 之前), `build-version.sh` 取不到基础版本号, 需要调用方用 `PROJECT_PACKAGE_VERSION` 传入包版本, 读取命令见语言模块. 传入值可以带 `TAG_PREFIX` 前缀, 脚本会剥掉; 缺这个变量时脚本会报出具体原因后失败: 仓库确实没有 tag, 有 tag 但没一个匹配 `TAG_PREFIX`, 或是浅克隆 (没 fetch tags) 取不到 tag. tag 是唯一版本来源的语言 (Go) 没有包版本可读, 首个 tag 之前由 CI 与 `just dist` 传 `0.0.0` 占位, 首个 tag 打完之后版本由 tag 提供.
 
-版本自动嵌入逻辑默认关闭, 只在发布构建路径通过显式开关 (如环境变量) 打开: 本地由 `just dist` 注入脚本结果, CI 用同一环境变量注入 `build_version`, 具体注入机制见语言模块. 不要让普通开发构建无条件读取 `.git`, 否则每次 commit 都会使增量编译缓存失效, `target` 等构建目录持续膨胀.
+版本自动嵌入逻辑默认关闭, 只在发布构建路径通过显式开关 (如环境变量) 打开: 本地由 `just dist` 注入脚本结果, CI 用同一环境变量注入 `build_version`, 具体注入机制见语言模块. 不要让普通开发构建无条件读取 `.git`, 否则每次 commit 都会使增量编译缓存失效, `target` 等构建目录持续膨胀. 不经 `just dist` 直接跑 `scripts/dist.sh` / `dist.ps1` 时, `PROJECT_BUILD_VERSION` 由脚本内部兜底, 这种调用在仓库还没有 tag 时也要自己带上 `PROJECT_PACKAGE_VERSION`.
 
 优先调用项目已有的 task runner 或打包脚本. 平台专用打包包含应用目录, 图标, metadata 或签名准备时, 将逻辑放在项目脚本中, 不要把完整实现内联到 workflow.
 
@@ -93,7 +94,7 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 
 桌面应用默认形态 (安装版) 就是 `just dist` 的产物. 只有当项目明确提供便携版形态时, 才额外新增同样不接受参数的 `just dist-portable`; 不要用参数或环境变量在两种形态之间切换, 也不要新增按平台命名的 recipe.
 
-二进制/应用示例, 为同一 `dist` recipe 添加互斥的平台属性, 并注入构建版本. `scripts/dist.sh` 与 `scripts/dist.ps1` 来自语言模块, 项目需要平台专用打包 (应用目录, 图标, 签名等) 时由脚本内部继续调用项目自己的打包脚本:
+二进制/应用示例, 为同一 `dist` recipe 添加互斥的平台属性, 并注入构建版本. `scripts/dist.sh` 与 `scripts/dist.ps1` 来自语言模块, 项目需要平台专用打包 (应用目录, 图标, 签名等) 时由脚本内部继续调用项目自己的打包脚本. `PROJECT_PACKAGE_VERSION_COMMAND` 是语言模块给出的包版本读取命令, 只在仓库还没有版本 tag 时被用到, 但仍然每次都传, 免得首个 tag 之前 `just dist` 与 CI 直接失败. Windows recipe 里的同一处要写成 PowerShell 表达式而不是照抄 bash 命令, 例如 `(Get-Content package.json | ConvertFrom-Json).version`; 赋值时不要再套一层双引号, 否则命令里原有的引号会被 PowerShell 提前截断:
 
 ```justfile
 # 根据当前平台生成发布产物.
@@ -101,6 +102,7 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 [script('powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File')]
 dist:
     $ErrorActionPreference = 'Stop'
+    $env:PROJECT_PACKAGE_VERSION = PROJECT_PACKAGE_VERSION_COMMAND
     $version = (& 'scripts/build-version.ps1' | Out-String).Trim()
     $env:PROJECT_BUILD_VERSION = "v$version"
     & 'scripts/dist.ps1'
@@ -109,12 +111,12 @@ dist:
 # 根据当前平台生成发布产物.
 [macos]
 dist:
-    PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
+    PROJECT_PACKAGE_VERSION="$(PROJECT_PACKAGE_VERSION_COMMAND)" PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
 
 # 根据当前平台生成发布产物.
 [linux]
 dist:
-    PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
+    PROJECT_PACKAGE_VERSION="$(PROJECT_PACKAGE_VERSION_COMMAND)" PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
 ```
 
 `dist` 用的平台属性 (`[macos]` / `[linux]` / `[windows]`) 与 `[script(...)]` 需要较新的 just (实测 1.58 可用). just 版本过旧时会报未知属性, 此时改用 shebang recipe 在脚本内判断平台.
@@ -135,7 +137,7 @@ dist:
 - `tag_name`: tag push 的 ref name 或手动输入的 tag.
 - `source_ref`: tag 发布时为 `refs/tags/TAG`, 其他情况为当前事件的 `github.sha`.
 - `version`: 仅在 `is_release` 为 `true` 且版本校验成功后输出.
-- `build_version`: 二进制/应用必须始终输出. release 时等于 `version`; 非 release 时用脚本 stdout. 库分发不需要这个 output.
+- `build_version`: 二进制/应用必须始终输出. release 时等于 `version`; 非 release 时用脚本 stdout, 并按语言模块给出的命令把包版本作为 `PROJECT_PACKAGE_VERSION` 传给脚本, 让仓库还没有版本 tag 时也能算出一个带短 hash 的兜底版本号, 不至于让首个 tag 之前的 branch 与 PR 运行失败. 库分发不需要这个 output.
 
 手动 tag 先用 `git check-ref-format "refs/tags/$TAG_NAME"` 校验格式, 再检出完整 tag. Tag 不存在时必须在构建开始前失败.
 
@@ -349,6 +351,8 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 14. 确认缓存机制选择顺序正确, 专用缓存与项目实际匹配, 没有重复缓存同一路径, 且 fallback 缓存 miss 时仍能完整构建.
 15. 不需要在项目当中编写发布工作流的文档和发布新版本的操作说明, agent 通过阅读此 skill 可以重新获取相关信息. 也不需要发布新版本的 just recipe, 需要 agent 手动实现.
 16. 语言模块给出的 `dist.sh` / `dist.ps1` 与 `archive.sh` / `archive.ps1` 要真跑一次: 至少覆盖一个 Unix 平台与一个 Windows 平台, 断言产物命名符合约定, 且二进制报出的版本号与注入值一致. 无法本地跑的平台按 [pending-verification.md](references/pending-verification.md) 的替代路径处理.
+17. 在一个还没有任何 tag 的仓库里跑一遍 `build-version.sh` 与 `just dist`: 有包版本的 `PROJECT_PACKAGE_VERSION` 时应当得到 `包版本-短hash`, Go 用 `0.0.0` 占位; 同时确认缺这个变量, tag 不匹配 `TAG_PREFIX` 和浅克隆三种情况都给出对应的原因, 而不是统一报"没有 tag".
+18. 确认 workflow 的 `解析构建版本` 步骤与 `just dist` 都传了 `PROJECT_PACKAGE_VERSION`, 并且 `build_version` 在任何触发方式下都有值, 首个 tag 之前的 branch 与 PR 运行不会失败.
 
 本地检查不能证明所有 GitHub hosted runner 均可用. 待验证事项, 无法本地实证时的替代路径, 环境漂移与发布序列的历史遗留统一记录在 [pending-verification.md](references/pending-verification.md), 本文件不再重复罗列.
 
