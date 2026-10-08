@@ -21,7 +21,7 @@
 - tag 必须以项目约定的前缀开头 (通常 `v`).
 - `docs/changelog/<version>.md` 存在且非空.
 
-仓库还没有版本 tag 时没有包版本可读, `build-version.sh` 只能用占位版本: 首个 tag 之前, CI 的 `解析构建版本` 步骤与 `just dist` 都传 `PROJECT_PACKAGE_VERSION=0.0.0`, 得到 `0.0.0-<短 hash>` 这样的兜底版本号, 于是 branch 与 PR 运行不会因为缺版本号失败. 首个 tag 推送后正式版本由 tag 提供, 不要在项目里长期维护这份占位版本号.
+仓库还没有版本 tag 时没有包版本可读, `build-version.py` 只能用占位版本: `dist.py` 顶部的 `PACKAGE_VERSION` 常量与 CI 的 `解析构建版本` 步骤都传 `0.0.0`, 得到 `0.0.0-<短 hash>` 这样的兜底版本号, 于是 branch 与 PR 运行不会因为缺版本号失败. 首个 tag 推送后正式版本由 tag 提供, 不要在项目里长期维护这份占位版本号.
 
 主版本号大于等于 2 时, `go.mod` 的 module path 必须以 `/v2` 这类后缀结尾, 并且 tag 写作 `v2.x.y`, 否则 `go get` 无法解析.
 
@@ -60,19 +60,22 @@ go build -trimpath \
 ```
 
 - 注入路径是完整的包导入路径, 用 `go list -m` 取模块名, 不要手写, 重命名模块时会静默失效.
+- `dist.py` 的平台与架构取自 `go env GOOS` / `GOARCH`, 与 `go build` 实际目标一致, 所以不要用 `TARGET_PLATFORM` / `TARGET_ARCH` 另设命名, 否则产物名会与实际文件格式不符.
 - `version` 变量必须是变量而不是常量, 常量无法在链接期覆盖.
 - 日常开发构建不设置 `PROJECT_BUILD_VERSION`, 显示 `dev-build`.
-- `just dist` 与 CI 都传带 `v` 前缀的值 (二进制内显示跟随 tag 样式); 产物名里的 `v` 由 `dist.sh` / `dist.ps1` 剥掉, 调用方不用管.
+- `just dist` 与 CI 都传带 `v` 前缀的值 (二进制内显示跟随 tag 样式); 产物名里的 `v` 由 `dist.py` 剥掉, 调用方不用管.
 - 不要用 `debug.ReadBuildInfo()` 的 vcs 信息拼版本号: `-buildvcs=false` 或非 git 构建时它缺失, 而且会把哈希带进正式产物.
 - 注入失效时 `-X` 不报错, 所以构建后必须冒烟断言一次.
 
 ```yaml
 - name: 生成当前平台发布产物
-  shell: bash
   env:
     PROJECT_BUILD_VERSION: v${{ needs.version.outputs.build_version }}
-  run: bash scripts/dist.sh
+  run: uv run --no-project python scripts/dist.py
 ```
+
+- 用 `uv run --no-project python` 而不是裸 `python` / `python3`: 解释器名在各平台不一致, uv 会自己选一个可用的, 三个平台共用同一条命令. Go 项目的脚本不碰项目环境, 所以带 `--no-project`.
+- 该步骤所在 job 需要先执行 `准备 uv` (见 [workflow-patterns.md](../workflow-patterns.md#ci-tag-与手动条件)).
 
 ## 依赖与构建缓存
 
@@ -146,35 +149,19 @@ strategy:
 
 ## 归档与打包
 
-复制 [assets/go/dist.sh](assets/go/dist.sh) 到项目的 `scripts/dist.sh`, 同时复制 [../archive.sh](../archive.sh) 与 [../build-version.sh](../build-version.sh); Windows 侧对应复制 [assets/go/dist.ps1](assets/go/dist.ps1), [../archive.ps1](../archive.ps1), [../build-version.ps1](../build-version.ps1).
+复制 [assets/go/dist.py](assets/go/dist.py) 到项目的 `scripts/dist.py`, 同时复制 [../archive.py](../archive.py), [../build-version.py](../build-version.py) 与 [../release_common.py](../release_common.py). 平台判断在脚本内部完成, 不需要再准备一份 Windows 专用脚本.
 
-`dist.sh` 只改顶部几个常量: `PROJECT_NAME`, `MAIN_PACKAGE`, `BINARY_NAME`, `SMOKE_ARGS`. 它负责构建, 冒烟断言版本号, 然后交给 `archive.sh` 拼名字并压缩. 归档用的版本段已在脚本内部剥掉 `v` 前缀, 所以产物名形如 `dida-0.1.2-linux-x86_64.tar.gz`, 而二进制内显示的是 `v0.1.2`; 两者样式不同是刻意的, 不要为了统一去改这段逻辑.
+`dist.py` 只改顶部几个常量: `PROJECT_NAME`, `MAIN_PACKAGE`, `BINARY_NAME`, `PACKAGE_VERSION`, `SMOKE_ARGS`. 它负责构建, 冒烟断言版本号, 然后交给 `archive.py` 拼名字并压缩. 归档用的版本段已在脚本内部剥掉 `v` 前缀, 所以产物名形如 `dida-0.1.2-linux-x86_64.tar.gz`, 而二进制内显示的是 `v0.1.2`; 两者样式不同是刻意的, 不要为了统一去改这段逻辑.
 
-`justfile` 保持一个不接受参数的 `dist`:
+`justfile` 保持一个不接受参数的 `dist`, 平台差异交给脚本:
 
 ```justfile
 # 根据当前平台生成发布产物.
-[macos]
 dist:
-    PROJECT_PACKAGE_VERSION="0.0.0" PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
-
-# 根据当前平台生成发布产物.
-[linux]
-dist:
-    PROJECT_PACKAGE_VERSION="0.0.0" PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
-
-# 根据当前平台生成发布产物.
-[windows]
-[script('powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File')]
-dist:
-    $ErrorActionPreference = 'Stop'
-    $env:PROJECT_PACKAGE_VERSION = "0.0.0"
-    $env:PROJECT_BUILD_VERSION = "v$(& 'scripts/build-version.ps1' | Out-String).Trim()"
-    & 'scripts/dist.ps1'
-    if ($LASTEXITCODE) { exit $LASTEXITCODE }
+    uv run --no-project python scripts/dist.py
 ```
 
-不经 `just dist` 直接跑 `scripts/dist.sh` 时, 仓库还没有 tag 的情况下同样要带上 `PROJECT_PACKAGE_VERSION=0.0.0`, 否则脚本内部兜底会失败.
+不经 `just dist` 直接跑 `scripts/dist.py` 时, 仓库还没有 tag 的情况下脚本会用 `PACKAGE_VERSION` 常量兜底, 不用在外面再传变量.
 
 归档内容只放二进制本身, 需要时附加 `README.md` 与 `LICENSE`, 不要塞入 `go.mod` 或源码.
 
@@ -196,7 +183,7 @@ goreleaser 可以承担 deb/rpm, Homebrew tap, scoop 这类分发产物, 但必�
 
 ## 已知坑
 
-- `-X` 路径写错或变量被改成常量时静默失效, 必须靠 `dist.sh` 的冒烟断言兜住.
+- `-X` 路径写错或变量被改成常量时静默失效, 必须靠 `dist.py` 的冒烟断言兜住.
 - 默认的 buildvcs 会把 git 状态写进二进制, 发布构建加 `-trimpath`, 并显式决定是否需要 vcs 信息.
 - `CGO_ENABLED=0` 得到静态产物, 不继承 runner 的 glibc 下限; 一旦打开 cgo, 就要按 SKILL.md 的 glibc 说明评估兼容性, 不要声称普通动态链接产物是通用静态二进制.
 - Windows 产物要带 `.exe` 后缀并打 `zip`, 命名仍用 `windows` 与 `x86_64` 这样的 token.

@@ -6,7 +6,9 @@ SKILL.md 与语言模块只引用本文件, 不要在多处重复罗列同一件
 ## 必须在真实 run 上确认
 
 - runner 资格与标签可用性: 本地无法证明 GitHub hosted runner 存在且可排队, 只有真实 run 能确认.
-- 平台依赖: 各平台构建工具链 (PowerShell 版本, `tar` / `zip` 命令, 交叉编译的 linker 与 sysroot) 只在对应 runner 上才被真正检验.
+- 平台依赖: 各平台构建工具链 (MSVC 与 Inno Setup, Xcode 命令行工具, 交叉编译的 linker 与 sysroot) 只在对应 runner 上才被真正检验. 发布脚本用的 Python 由 uv 自己解析, 不依赖 runner 预装的解释器, 所以不需要 `actions/setup-python`; 但 uv 本身没有预装在托管 runner 镜像里, 每个要跑脚本的 job 都要先执行 `astral-sh/setup-uv`.
+- setup-uv 的引用方式: 浮动 major 标签只到 `v7`, `v8` 及其之后只有完整版本号与 commit SHA. 本地无法验证 workflow 中 action 引用能否解析, 只能在真实 run 上确认.
+- 中文日志编码: 脚本已把输出切到 UTF-8, Windows runner 上是否仍有控制台代码页相关的告警或乱码, 只能在真实 run 上确认.
 - 发布权限: release job 的 `contents: write` 与 `gh` CLI 行为只在真实 tag run 上生效.
 - 首次 tag 发布必须覆盖 release job 本体: tag annotation 字节比较, generated notes 拼接, `SHA256SUMS`, `gh release create`. branch 与 PR 运行碰不到这些步骤.
 
@@ -17,10 +19,10 @@ SKILL.md 与语言模块只引用本文件, 不要在多处重复罗列同一件
 
 ## 无法本地实证时的替代路径
 
-非 Windows 开发机上通常没有 `pwsh`, `build-version.ps1`, `dist.ps1` 与 `archive.ps1` 无法本地跑. 此时按以下三步做, 三步都完成才算 Windows 侧已实证:
+发布脚本是跨平台的 Python, 通过 uv 调用, 任何装了 uv 的机器都能直接跑; Windows 目标的构建工具链 (MSVC, Inno Setup 等) 只有 Windows 上才有. 非 Windows 开发机按以下三步做, 三步都完成才算 Windows 侧已实证:
 
-1. 本地跑 `build-version.sh`, `dist.sh` 与 `archive.sh`, 断言产物命名, 二进制自报版本与无 tag 时的兜底版本号都符合约定.
-2. 推送后让 CI 的 windows runner 跑 `dist.ps1` 与 `archive.ps1`.
+1. 本地跑 `build-version.py`, `dist.py` 与 `archive.py`, 断言产物命名, 二进制自报版本与无 tag 时的兜底版本号都符合约定. Windows 目标的命名与归档格式可以拿 `archive.py` 单独验证 (设 `TARGET_PLATFORM=windows TARGET_ARCH=x86_64` 并把它指向一个放好假产物的 staging 目录), 不过这只验证了命名与压缩逻辑, 不能替代真实构建.
+2. 推送后让 CI 的 windows runner 跑 `dist.py` 与 `archive.py`.
 3. 用 `gh run download` 取回 Windows artifact, 核对压缩包名与内容 (PE 产物存在, 包内只有预期文件).
 
 只做到第 1 步时, 汇报里必须写明"Windows 侧未实证", 不要当作已验证.

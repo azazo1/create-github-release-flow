@@ -41,11 +41,12 @@
 - 版本在 `dynamic` 里时, 改为读取构建产物 metadata: `python -c 'import importlib.metadata as m; print(m.version("PROJECT"))'`, 并确认它与 tag 对齐.
 - 库分发的版本必须是 PyPI 接受的稳定版本号, 不要用 `+<hash>` 本地版本段表达开发状态.
 - 不要为了统一版本号在构建脚本里改写 `pyproject.toml`.
-- 仓库还没有版本 tag 时 (首个 tag 之前), 同一条读取命令要再喂给 `build-version.sh`: 在 `just dist` 的 recipe 与 workflow 的 `解析构建版本` 步骤里把它作为 `PROJECT_PACKAGE_VERSION` 传入, 得到 `0.4.2-<短 hash>` 这样的兜底版本号, 首个 tag 之前的 branch 与 PR 运行才不会因为缺少版本号而失败.
+- 仓库还没有版本 tag 时 (首个 tag 之前), 包版本要作为兜底版本号的基础: `dist.py` 内部的 `package_version_fallback()` 先读 `pyproject.toml` 的 `[project].version`, 再退回 `importlib.metadata`, CI 的 `解析构建版本` 步骤用上面给出的 shell 命令读同一份数据, 两边都得到 `0.4.2-<短 hash>` 这样的兜底版本号, 首个 tag 之前的 branch 与 PR 运行才不会因为缺少版本号而失败.
+- `dist.py` 的兜底读法用标准库 `tomllib`, 因此需要 Python 3.11 及以上; 项目固定在更早的小版本时, 把 `PACKAGE_NAME` 交给 `importlib.metadata` 分支即可.
 
 ## 版本注入与运行时显示
 
-复制 [assets/python/_build_version.py](assets/python/_build_version.py) 到项目源码包内 (例如 `src/<package>/_build_version.py`). 发行构建时由 `scripts/dist.sh` 在同目录生成 `_generated_version.py`:
+复制 [assets/python/_build_version.py](assets/python/_build_version.py) 到项目源码包内 (例如 `src/<package>/_build_version.py`). 发行构建时由 `scripts/dist.py` 在同目录生成 `_generated_version.py`:
 
 ```python
 BUILD_VERSION = "v1.2.3"
@@ -64,12 +65,14 @@ BUILD_VERSION = "v1.2.3"
     python-version-file: .python-version
 
 - name: 准备 uv
-  uses: astral-sh/setup-uv@v10
+  uses: astral-sh/setup-uv@v7
   with:
     enable-cache: true
 ```
 
 - 用 uv 管理依赖时优先 `astral-sh/setup-uv` 的 `enable-cache`, 不要再用 `actions/setup-python` 的 `cache` 缓存同一份内容.
+- setup-uv 的浮动 major 标签只到 `v7`, `v8` 及其之后只有完整版本号与 commit SHA; 引用更新版本时写完整版本号或 commit SHA, 不要写 `@v8` 及以上不存在的引用.
+- 发布脚本 (`scripts/*.py`) 只用标准库, 跑它们时用 `uv run --no-project`, 不要让它去解析项目依赖.
 - Python 小版本要固定 (`python-version-file` 或 `.python-version`), 不要在 workflow 里写 `3.x`.
 - 冻结安装: `uv sync --frozen`, 或 `pip install -r requirements.txt --require-hashes` 之类的等价做法.
 
@@ -103,14 +106,16 @@ uv build
 
 ## 归档与打包
 
-复制 [assets/python/dist.sh](assets/python/dist.sh) 到 `scripts/dist.sh`, 再复制 [assets/python/entry.py](assets/python/entry.py) 到 `scripts/entry.py` (把里面的包名占位符换掉), 同时复制 [../archive.sh](../archive.sh) 与 [../build-version.sh](../build-version.sh); Windows 侧复制 [assets/python/dist.ps1](assets/python/dist.ps1), [../archive.ps1](../archive.ps1), [../build-version.ps1](../build-version.ps1).
+复制 [assets/python/dist.py](assets/python/dist.py) 到 `scripts/dist.py`, 再复制 [assets/python/entry.py](assets/python/entry.py) 到 `scripts/entry.py` (把里面的包名占位符换掉), 同时复制 [../archive.py](../archive.py), [../build-version.py](../build-version.py) 与 [../release_common.py](../release_common.py). 平台判断在脚本内部完成, 不需要再准备一份 Windows 专用脚本.
 
-- 只改顶部常量: `PROJECT_NAME`, `PACKAGE_DIR`, `ENTRY`, `PACKAGE_PATH`, `BINARY_NAME`, `SMOKE_ARGS`.
+- 只改顶部常量: `PROJECT_NAME`, `PACKAGE_NAME`, `PACKAGE_DIR`, `ENTRY`, `PACKAGE_PATH`, `BINARY_NAME`, `SMOKE_ARGS`.
 - `ENTRY` 必须指向绝对导入的启动脚本 (`scripts/entry.py`), 不能指向包内的 `__main__.py`: 后者由 `python -m` 执行时相对导入成立, 被 PyInstaller 当作顶层 `__main__` 执行时必然报 `ImportError: attempted relative import with no known parent package`. 已经实测踩过这一次.
 - `PACKAGE_PATH` 是包所在的那一层目录 (通常 `src`), 交给 PyInstaller 的 `--paths` 解析绝对导入.
 - `BUILD_MODE=pyinstaller` 是生产推荐路径, 需要环境中已安装 PyInstaller; `BUILD_MODE=zipapp` 只用标准库, 但仅适用于 Unix, 适合快速验证与内部工具, 它需要 `ZIPAPP_SOURCE` (包含包目录的那一层) 与 `ZIPAPP_MAIN` (形如 `<包名>.__main__:main`).
-- `justfile` 的 `dist` 与 Go 模块给出的形状一致, 只把构建命令换成打包命令, 并把 recipe 里的 `PROJECT_PACKAGE_VERSION` 换成上面给出的包版本读取命令.
-- 不经 `just dist` 直接跑 `scripts/dist.sh` 时, 仓库还没有 tag 的情况下同样要带上 `PROJECT_PACKAGE_VERSION`, 否则脚本内部兜底会失败.
+- PyInstaller 装在项目环境里, 所以 Python 项目的 `dist.py` 要用 `uv run python scripts/dist.py` 调用 (`--no-project` 会让 PyInstaller 不可见), `justfile` 的 `dist` 与 workflow 步骤都照此写; 只有 `BUILD_MODE=zipapp` 时才可以用 `uv run --no-project`.
+- `TARGET_PLATFORM` / `TARGET_ARCH` 是给交叉编译的语言 (Rust, .NET) 用的命名覆盖; PyInstaller 与 zipapp 都只能出当前平台的产物, 在 Python 项目里不要把这两个变量设成别的平台.
+- `justfile` 的 `dist` 与 Go 模块给出的形状完全一致, 打包命令由 `dist.py` 自己执行, 不需要再写别的 recipe.
+- 不经 `just dist` 直接跑 `scripts/dist.py` 时, 仓库还没有 tag 的情况下脚本会用包版本兜底, 不用在外面再传变量.
 - 归档内容只放可执行产物, 不要打包整个虚拟环境.
 
 ## 生态包发布

@@ -1,6 +1,6 @@
 """复制到项目源码包内, 例如 src/<package>/_build_version.py, 通常不需要改动.
 
-发行构建时 scripts/dist.sh 会在同目录生成 _generated_version.py 提供版本号, 该文件应当
+发行构建时 scripts/dist.py 会在同目录生成 _generated_version.py 提供版本号, 该文件应当
 加入 .gitignore; 日常开发构建没有这个文件, 回落到 dev-build.
 """
 

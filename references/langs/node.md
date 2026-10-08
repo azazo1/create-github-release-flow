@@ -39,7 +39,7 @@
 - workspaces 或 monorepo 里对每个要发布的包各读一次 `package.json`, 全部与 tag 对齐.
 - 库分发的包版本必须是稳定 SemVer, 不要把 commit 短 hash 写进 `version`.
 - 不要为了统一版本号在构建脚本里改写 `package.json`; 版本由发布准备阶段的提交决定.
-- 仓库还没有版本 tag 时 (首个 tag 之前), 同一条读取命令要再喂给 `build-version.sh`: 在 `just dist` 的 recipe 与 workflow 的 `解析构建版本` 步骤里把它作为 `PROJECT_PACKAGE_VERSION` 传入, 得到 `0.4.2-<短 hash>` 这样的兜底版本号, 首个 tag 之前的 branch 与 PR 运行才不会因为缺少版本号而失败.
+- 仓库还没有版本 tag 时 (首个 tag 之前), 包版本要作为兜底版本号的基础: `dist.py` 内部的 `package_version_fallback()` 读 `package.json` 的 `version`, CI 的 `解析构建版本` 步骤用下面这条命令读同一份数据, 两边都得到 `0.4.2-<短 hash>` 这样的兜底版本号, 首个 tag 之前的 branch 与 PR 运行才不会因为缺少版本号而失败.
 
 ```shell
 PROJECT_PACKAGE_VERSION="$(node -p "require('./package.json').version")"
@@ -110,12 +110,13 @@ pnpm run test
 
 ## 归档与打包
 
-复制 [assets/node/dist.sh](assets/node/dist.sh) 到 `scripts/dist.sh`, 同时复制 [../archive.sh](../archive.sh) 与 [../build-version.sh](../build-version.sh); Windows 侧复制 [assets/node/dist.ps1](assets/node/dist.ps1), [../archive.ps1](../archive.ps1), [../build-version.ps1](../build-version.ps1).
+复制 [assets/node/dist.py](assets/node/dist.py) 到 `scripts/dist.py`, 同时复制 [../archive.py](../archive.py), [../build-version.py](../build-version.py) 与 [../release_common.py](../release_common.py). 平台判断在脚本内部完成, 不需要再准备一份 Windows 专用脚本.
 
 - 只改顶部常量: `PROJECT_NAME`, `ENTRY`, `BINARY_NAME`, `SMOKE_ARGS`; 需要时用 `BUNDLER` 在 bun 与 esbuild 之间切换.
-- Windows 产物必须带 `.exe` 后缀并打成 `zip`, 命名里仍用 `windows-x86_64` 这类 token.
-- `justfile` 的 `dist` 与 Go 模块给出的形状一致, 只把构建命令换成打包命令, 并把 recipe 里的 `PROJECT_PACKAGE_VERSION` 换成上面给出的包版本读取命令.
-- 不经 `just dist` 直接跑 `scripts/dist.sh` 时, 仓库还没有 tag 的情况下同样要带上 `PROJECT_PACKAGE_VERSION`, 否则脚本内部兜底会失败.
+- Windows 产物必须带 `.exe` 后缀并打成 `zip`, 命名里仍用 `windows-x86_64` 这类 token; 这两件事脚本按当前平台自动处理.
+- `TARGET_PLATFORM` / `TARGET_ARCH` 是给交叉编译的语言 (Rust, .NET) 用的命名覆盖; bun 只能出当前平台的可执行文件, 所以在 node 项目里不要把这两个变量设成别的平台, 否则只是把产物改了个名字.
+- `justfile` 的 `dist` 与 Go 模块给出的形状完全一致, 打包命令由 `dist.py` 自己执行, 不需要再写别的 recipe.
+- 不经 `just dist` 直接跑 `scripts/dist.py` 时, 仓库还没有 tag 的情况下脚本会用 `package.json` 的 `version` 兜底, 不用在外面再传变量.
 - 归档内容只放可执行产物; 不要把 `node_modules` 打进去.
 
 ## 生态包发布

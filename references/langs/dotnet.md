@@ -40,7 +40,7 @@
 - `-getProperty` 需要 .NET SDK 8 及以上; 更早版本用 `-getProperty:Version` 的等价参数或先 `dotnet build` 再读程序集属性.
 - 库分发使用 `PackageVersion` 时, 它必须与 tag 对齐, 并且不能带 commit hash.
 - 一个仓库有多个要发布的包时, 逐个求值确认一致.
-- 仓库还没有版本 tag 时 (首个 tag 之前), 同一条求值命令要再喂给 `build-version.sh`: 在 `just dist` 的 recipe 与 workflow 的 `解析构建版本` 步骤里把它作为 `PROJECT_PACKAGE_VERSION` 传入, 得到 `1.2.3-<短 hash>` 这样的兜底版本号, 首个 tag 之前的 branch 与 PR 运行才不会因为缺少版本号而失败.
+- 仓库还没有版本 tag 时 (首个 tag 之前), 包版本要作为兜底版本号的基础: `dist.py` 内部的 `package_version_fallback()` 用 `dotnet msbuild -getProperty:Version` 读同一个版本, CI 的 `解析构建版本` 步骤用上面给出的求值命令读同一份数据, 两边都得到 `1.2.3-<短 hash>` 这样的兜底版本号, 首个 tag 之前的 branch 与 PR 运行才不会因为缺少版本号而失败.
 
 ## 版本注入与运行时显示
 
@@ -112,13 +112,13 @@ dotnet format --verify-no-changes        # 只报告不修改
 
 ## 归档与打包
 
-复制 [assets/dotnet/dist.sh](assets/dotnet/dist.sh) 到 `scripts/dist.sh`, 同时复制 [../archive.sh](../archive.sh) 与 [../build-version.sh](../build-version.sh); Windows 侧复制 [assets/dotnet/dist.ps1](assets/dotnet/dist.ps1), [../archive.ps1](../archive.ps1), [../build-version.ps1](../build-version.ps1).
+复制 [assets/dotnet/dist.py](assets/dotnet/dist.py) 到 `scripts/dist.py`, 同时复制 [../archive.py](../archive.py), [../build-version.py](../build-version.py) 与 [../release_common.py](../release_common.py). 平台判断与 RID 推导都在脚本内部完成, 不需要再准备一份 Windows 专用脚本.
 
 - 只改顶部常量: `PROJECT_NAME`, `PROJECT_FILE`, `BINARY_NAME`, `SMOKE_ARGS`.
-- `BUILD_MODE=self-contained` 出带平台架构后缀的 RID 二进制; `BUILD_MODE=framework-dependent` 出平台无关的 dll 程序集, 交给 `archive.sh` 时设 `PLATFORM_INDEPENDENT=1`, 得到 `PROJECT-VERSION.zip`.
+- `BUILD_MODE=self-contained` 出带平台架构后缀的 RID 二进制; `BUILD_MODE=framework-dependent` 出平台无关的 dll 程序集, 脚本会按 `PLATFORM_INDEPENDENT=1` 交给归档 helper, 得到 `PROJECT-VERSION.zip`.
 - 框架依赖产物要确保运行方式对用户可见: 归档内附一份说明, 或在 Release notes 里写清需要的运行时版本.
-- `justfile` 的 `dist` 与 Go 模块给出的形状一致, 只把构建命令换成 `dotnet publish`, 并把 recipe 里的 `PROJECT_PACKAGE_VERSION` 换成上面给出的包版本求值命令.
-- 不经 `just dist` 直接跑 `scripts/dist.sh` 时, 仓库还没有 tag 的情况下同样要带上 `PROJECT_PACKAGE_VERSION`, 否则脚本内部兜底会失败.
+- `justfile` 的 `dist` 与 Go 模块给出的形状完全一致, `dotnet publish` 由 `dist.py` 自己执行, 不需要再写别的 recipe.
+- 不经 `just dist` 直接跑 `scripts/dist.py` 时, 仓库还没有 tag 的情况下脚本会用 `dotnet msbuild -getProperty:Version` 读到的包版本兜底, 不用在外面再传变量.
 
 ## 生态包发布
 

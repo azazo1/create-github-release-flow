@@ -18,7 +18,9 @@
   - [创建或更新 release](#创建或更新-release)
   - [库分发的 notes-only release](#库分发的-notes-only-release)
 
-示例中的 action major version 和 runner 标签只是结构的一部分. 使用前复核当前稳定版本, runner 可用性和项目的 action pinning 策略. 示例统一使用 node24 runtime 的 action major, 因为 node20 runtime 的旧 major 会在 runner 移除 node20 后直接失败. 本次核对到的当前 major: checkout v7, upload-artifact v7, download-artifact v8, cache v6, setup-go v7, setup-node v7, setup-python v7, setup-dotnet v6. 这些 major 要求 runner 不低于 2.327.1, 自建 runner 需要先升级 runner 版本.
+示例中的 action major version 和 runner 标签只是结构的一部分. 使用前复核当前稳定版本, runner 可用性和项目的 action pinning 策略. 示例统一使用 node24 runtime 的 action major, 因为 node20 runtime 的旧 major 会在 runner 移除 node20 后直接失败. 本次核对到的当前 major: checkout v7, upload-artifact v7, download-artifact v8, cache v6, setup-go v7, setup-node v7, setup-python v7, setup-dotnet v6, setup-uv v7. 这些 major 要求 runner 不低于 2.327.1, 自建 runner 需要先升级 runner 版本.
+
+> 注: `astral-sh/setup-uv` 的浮动 major 标签只到 `v7`, `v8` 及其之后没有浮动标签 (官方改用完整 SHA pinning). 要用更新版本时写完整版本号 (`@v10.2.0`) 或完整 commit SHA, 不要写 `@v8` 及以上不存在的引用. 发布脚本用 `uv run --no-project python` 调用, 所有需要跑脚本的 job 都要先安装 uv.
 
 ## 触发与并发
 
@@ -101,6 +103,11 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      - name: 准备 uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
+
       - name: 校验发布版本
         id: release_version
         if: steps.release_context.outputs.is_release == 'true'
@@ -122,11 +129,12 @@ jobs:
             exit 0
           fi
 
-          # 仓库还没有版本 tag 时 (首个 tag 之前) build-version.sh 取不到基础版本号, 需要包版本兜底.
+          # 仓库还没有版本 tag 时 (首个 tag 之前) build-version.py 取不到基础版本号, 需要包版本兜底.
           # 读取命令按语言模块给出的结构化 metadata 命令填写, 例如 package.json, Cargo.toml,
           # pyproject.toml 或 csproj; Go 没有包版本可读, 按 go 模块写占位版本.
+          # 各语言 dist.py 内部读的是同一份数据, 这里保持两边一致即可.
           package_version="$(PROJECT_PACKAGE_VERSION_COMMAND)"
-          echo "build_version=$(PROJECT_PACKAGE_VERSION="$package_version" bash scripts/build-version.sh)" >> "$GITHUB_OUTPUT"
+          echo "build_version=$(PROJECT_PACKAGE_VERSION="$package_version" uv run --no-project python scripts/build-version.py)" >> "$GITHUB_OUTPUT"
 
   build:
     needs: version
@@ -141,6 +149,11 @@ jobs:
           ref: ${{ needs.version.outputs.source_ref }}
           fetch-depth: 0
           fetch-tags: true
+
+      - name: 准备 uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
 
       - name: 构建
         env:
@@ -172,7 +185,7 @@ jobs:
           fetch-depth: 0
 ```
 
-没有 tag 时 `version` output 不存在, 但 `version` job 仍要成功完成: `build_version` 始终有值, 仓库一个版本 tag 都没有时由包版本加短 hash 兜底, 所以首个 tag 之前的 branch 与 PR 运行也能构建和上传 artifact. 只在 `is_release` 条件的步骤和 job 中消费 `version` output. 二进制/应用的打包和 artifact 上传不要再加 `is_release` 或 `workflow_dispatch` 条件, 非 release 产物用 `build_version` 命名, 平台相关产物的 Actions artifact 名也要带上这个版本号以及 platform 和 arch (桌面应用还要带上形态变体段), 平台无关的托管运行时产物 (如 .NET dll, Java jar) 按其自身规则命名, 不加 platform 和 arch. 库分发省略打包, artifact 上传和 SHA256SUMS 步骤, 矩阵按测试需求覆盖. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout.
+没有 tag 时 `version` output 不存在, 但 `version` job 仍要成功完成: `build_version` 始终有值, 仓库一个版本 tag 都没有时由包版本加短 hash 兜底, 所以首个 tag 之前的 branch 与 PR 运行也能构建和上传 artifact. 只在 `is_release` 条件的步骤和 job 中消费 `version` output. 二进制/应用的打包和 artifact 上传不要再加 `is_release` 或 `workflow_dispatch` 条件, 非 release 产物用 `build_version` 命名, 平台相关产物的 Actions artifact 名也要带上这个版本号以及 platform 和 arch (桌面应用还要带上形态变体段), 平台无关的托管运行时产物 (如 .NET dll, Java jar) 按其自身规则命名, 不加 platform 和 arch. 库分发省略打包, artifact 上传和 SHA256SUMS 步骤, 矩阵按测试需求覆盖. Release job 也要用 `source_ref` 检出目标 tag, 不要依赖 workflow dispatch 所在 branch 的默认 checkout. 每个要跑发布脚本的 job 都要有单独的 `准备 uv` 步骤: job 之间不共享已安装的工具.
 
 ## 依赖与构建缓存
 

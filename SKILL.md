@@ -78,15 +78,16 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 > 版本号显示必须自动生成, 而不是手动编辑写死.
 > 库分发不要把 git describe 或短 hash 写入包版本. 包版本保持 metadata 中的稳定版本, 由 tag 与其严格对齐.
 
-二进制/应用复制 [build-version.sh](references/build-version.sh) 和 [build-version.ps1](references/build-version.ps1) 到项目的 `scripts/`, 再按语言模块给出的清单复制归档 helper [archive.sh](references/archive.sh) 与 [archive.ps1](references/archive.ps1), 以及该语言的 `dist.sh` / `dist.ps1`. 各文件按开头说明改占位符, 复制后修正权限位 (`chmod 755 scripts/*.sh` 与 `chmod 644 scripts/*.ps1`), 否则脚本直接执行会失败.
+二进制/应用复制 [build-version.py](references/build-version.py), [archive.py](references/archive.py) 与 [release_common.py](references/release_common.py) 到项目的 `scripts/`, 再按语言模块给出的清单复制该语言的 `dist.py`. 这些脚本是跨平台的 Python, 只用标准库, 平台差异在脚本内部判断, 不要按平台拆成 sh 与 ps1 两份实现, 也不需要设置可执行位: 用 `uv run --no-project python scripts/<脚本>.py` 调用, 解释器由 uv 解析, 各平台共用同一条命令. `--no-project` 让 uv 不去读项目的 `pyproject.toml` 与建 `.venv`, 避免为只用标准库的脚本白做一次依赖解析; 但若项目需要脚本用到项目环境里的第三方工具 (例如 Python 项目的 `dist.py` 要用 PyInstaller), 该入口改用 `uv run python`, 让它复用项目环境. 各文件按开头说明改占位符.
 
-版本注入统一使用 `PROJECT_BUILD_VERSION` 环境变量, 归档命名统一由 `archive.sh` / `archive.ps1` 负责:
+版本注入统一使用 `PROJECT_BUILD_VERSION` 环境变量, 归档命名统一由 `archive.py` 负责:
 
 - **二进制内显示的版本**跟随 tag 样式, 通常带 `v` 前缀, 例如 `v1.2.3`, 非 tag commit 为 `v1.2.3-a1b2c3d`.
-- **产物名与 artifact 名的版本段不带 `v`**: `dist.sh` / `dist.ps1` 会剥掉前缀再交给归档 helper, 于是得到 `project-1.2.3-linux-x86_64.tar.gz`, 而不是 `project-v1.2.3-...`.
-- 仓库一个版本 tag 都没有时 (首个 tag 之前), `build-version.sh` 取不到基础版本号, 需要调用方用 `PROJECT_PACKAGE_VERSION` 传入包版本, 读取命令见语言模块. 传入值可以带 `TAG_PREFIX` 前缀, 脚本会剥掉; 缺这个变量时脚本会报出具体原因后失败: 仓库确实没有 tag, 有 tag 但没一个匹配 `TAG_PREFIX`, 或是浅克隆 (没 fetch tags) 取不到 tag. tag 是唯一版本来源的语言 (Go) 没有包版本可读, 首个 tag 之前由 CI 与 `just dist` 传 `0.0.0` 占位, 首个 tag 打完之后版本由 tag 提供.
+- **产物名与 artifact 名的版本段不带 `v`**: `dist.py` 先用 `build-version.py --with-prefix` 拿到带前缀的显示版本注入二进制, 再用 `build-version.py --strip-prefix` 得到不带前缀的版本交给归档 helper, 于是得到 `project-1.2.3-linux-x86_64.tar.gz`, 而不是 `project-v1.2.3-...`.
+- 仓库一个版本 tag 都没有时 (首个 tag 之前), `build-version.py` 取不到基础版本号, 需要包版本兜底: `dist.py` 内置的读法直接算出包版本并作为 `PROJECT_PACKAGE_VERSION` 传给 `build-version.py`, CI 侧用语言模块给出的 shell 命令读同一份数据. 传入值可以带 `TAG_PREFIX` 前缀, 脚本会剥掉; 缺这个变量时脚本会报出具体原因后失败: 仓库确实没有 tag, 有 tag 但没一个匹配 `TAG_PREFIX`, 或是浅克隆 (没 fetch tags) 取不到 tag. tag 是唯一版本来源的语言 (Go) 没有包版本可读, 首个 tag 之前由 `dist.py` 的 `PACKAGE_VERSION` 常量传 `0.0.0` 占位, 首个 tag 打完之后版本由 tag 提供.
+- 归档 helper 用标准库 `tarfile` / `zipfile` 打包, 不依赖系统里的 `tar` / `zip` 命令, 并保留可执行位; Windows 目标不必再换另一套脚本.
 
-版本自动嵌入逻辑默认关闭, 只在发布构建路径通过显式开关 (如环境变量) 打开: 本地由 `just dist` 注入脚本结果, CI 用同一环境变量注入 `build_version`, 具体注入机制见语言模块. 不要让普通开发构建无条件读取 `.git`, 否则每次 commit 都会使增量编译缓存失效, `target` 等构建目录持续膨胀. 不经 `just dist` 直接跑 `scripts/dist.sh` / `dist.ps1` 时, `PROJECT_BUILD_VERSION` 由脚本内部兜底, 这种调用在仓库还没有 tag 时也要自己带上 `PROJECT_PACKAGE_VERSION`.
+版本自动嵌入逻辑默认关闭, 只在发布构建路径通过显式开关 (如环境变量) 打开: 本地由 `just dist` 注入脚本结果, CI 用同一环境变量注入 `build_version`, 具体注入机制见语言模块. 不要让普通开发构建无条件读取 `.git`, 否则每次 commit 都会使增量编译缓存失效, `target` 等构建目录持续膨胀. 不经 `just dist` 直接跑 `scripts/dist.py` 时, `PROJECT_BUILD_VERSION` 由脚本内部兜底, 仓库还没有 tag 时包版本也由脚本自己读, 不需要额外传变量.
 
 优先调用项目已有的 task runner 或打包脚本. 平台专用打包包含应用目录, 图标, metadata 或签名准备时, 将逻辑放在项目脚本中, 不要把完整实现内联到 workflow.
 
@@ -94,32 +95,15 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 
 桌面应用默认形态 (安装版) 就是 `just dist` 的产物. 只有当项目明确提供便携版形态时, 才额外新增同样不接受参数的 `just dist-portable`; 不要用参数或环境变量在两种形态之间切换, 也不要新增按平台命名的 recipe.
 
-二进制/应用示例, 为同一 `dist` recipe 添加互斥的平台属性, 并注入构建版本. `scripts/dist.sh` 与 `scripts/dist.ps1` 来自语言模块, 项目需要平台专用打包 (应用目录, 图标, 签名等) 时由脚本内部继续调用项目自己的打包脚本. `PROJECT_PACKAGE_VERSION_COMMAND` 是语言模块给出的包版本读取命令, 只在仓库还没有版本 tag 时被用到, 但仍然每次都传, 免得首个 tag 之前 `just dist` 与 CI 直接失败. Windows recipe 里的同一处要写成 PowerShell 表达式而不是照抄 bash 命令, 例如 `(Get-Content package.json | ConvertFrom-Json).version`; 赋值时不要再套一层双引号, 否则命令里原有的引号会被 PowerShell 提前截断:
+二进制/应用示例. 平台判断和版本解析都在 `scripts/dist.py` 里, 所以一份 recipe 就能通吃三个平台, 不需要平台属性, 也不需要 `[script(...)]`, 更不需要区分解释器名. `PROJECT_PACKAGE_VERSION` 也不用在 recipe 里算: `dist.py` 自己会读包版本兜底. 项目需要平台专用打包 (应用目录, 图标, 签名等) 时, 由 `dist.py` 内部继续调用项目自己的打包脚本:
 
 ```justfile
 # 根据当前平台生成发布产物.
-[windows]
-[script('powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File')]
 dist:
-    $ErrorActionPreference = 'Stop'
-    $env:PROJECT_PACKAGE_VERSION = PROJECT_PACKAGE_VERSION_COMMAND
-    $version = (& 'scripts/build-version.ps1' | Out-String).Trim()
-    $env:PROJECT_BUILD_VERSION = "v$version"
-    & 'scripts/dist.ps1'
-    if ($LASTEXITCODE) { exit $LASTEXITCODE }
-
-# 根据当前平台生成发布产物.
-[macos]
-dist:
-    PROJECT_PACKAGE_VERSION="$(PROJECT_PACKAGE_VERSION_COMMAND)" PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
-
-# 根据当前平台生成发布产物.
-[linux]
-dist:
-    PROJECT_PACKAGE_VERSION="$(PROJECT_PACKAGE_VERSION_COMMAND)" PROJECT_BUILD_VERSION="v$(bash scripts/build-version.sh)" bash scripts/dist.sh
+    uv run --no-project python scripts/dist.py
 ```
 
-`dist` 用的平台属性 (`[macos]` / `[linux]` / `[windows]`) 与 `[script(...)]` 需要较新的 just (实测 1.58 可用). just 版本过旧时会报未知属性, 此时改用 shebang recipe 在脚本内判断平台.
+uv 由项目自行准备 (本机安装, 或 CI 里用 `astral-sh/setup-uv`); 托管 runner 镜像里没有预装 uv, 这一步不能省. 确需固定 uv 版本时, workflow 里给出 `version` 输入或用 `version-file` 指向 `uv.toml`.
 
 实现具体 YAML 片段时按需读取 [workflow-patterns.md](references/workflow-patterns.md), 不要一次性复制所有示例. 语言相关的片段在语言模块里, 骨架库只放语言无关部分.
 
@@ -140,6 +124,19 @@ dist:
 - `build_version`: 二进制/应用必须始终输出. release 时等于 `version`; 非 release 时用脚本 stdout, 并按语言模块给出的命令把包版本作为 `PROJECT_PACKAGE_VERSION` 传给脚本, 让仓库还没有版本 tag 时也能算出一个带短 hash 的兜底版本号, 不至于让首个 tag 之前的 branch 与 PR 运行失败. 库分发不需要这个 output.
 
 手动 tag 先用 `git check-ref-format "refs/tags/$TAG_NAME"` 校验格式, 再检出完整 tag. Tag 不存在时必须在构建开始前失败.
+
+`version` job 与全部构建或测试 job 都要先安装 uv, 因为发布脚本要经 uv 调用, 而托管 runner 镜像里没有预装 uv. 用 `astral-sh/setup-uv`:
+
+```yaml
+- name: 准备 uv
+  uses: astral-sh/setup-uv@v7
+  with:
+    enable-cache: false
+```
+
+- `enable-cache` 关掉: 脚本只用标准库, 没有依赖要缓存, 开了只是徒增缓存往返.
+- setup-uv 的浮动 major 标签只到 `v7`; `v8` 及其之后没有浮动标签, 不要写 `@v8` 这类不存在的引用. 需要更新的版本时写完整版本号 (`@v10.2.0`), 并按仓库的 pinning 策略决定是否改用完整 commit SHA.
+- 需要固定具体 uv 版本时在 `with` 里加 `version: <版本>`, 或用 `version-file` 指向 `uv.toml`.
 
 当普通 CI 和发布共用 workflow 时:
 
@@ -350,9 +347,10 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 13. 仅二进制/应用: 在精确 tag, 非 tag commit 和脏 HEAD 三种状态下, 检查 CLI/TUI/GUI 的版本显示符合约定; 日常开发构建显示 `dev-build`, 且构建脚本不会因 `.git` 变化触发重编. 库分发确认包版本仍是 metadata 中的稳定版本, 没有被写入 git hash.
 14. 确认缓存机制选择顺序正确, 专用缓存与项目实际匹配, 没有重复缓存同一路径, 且 fallback 缓存 miss 时仍能完整构建.
 15. 不需要在项目当中编写发布工作流的文档和发布新版本的操作说明, agent 通过阅读此 skill 可以重新获取相关信息. 也不需要发布新版本的 just recipe, 需要 agent 手动实现.
-16. 语言模块给出的 `dist.sh` / `dist.ps1` 与 `archive.sh` / `archive.ps1` 要真跑一次: 至少覆盖一个 Unix 平台与一个 Windows 平台, 断言产物命名符合约定, 且二进制报出的版本号与注入值一致. 无法本地跑的平台按 [pending-verification.md](references/pending-verification.md) 的替代路径处理.
-17. 在一个还没有任何 tag 的仓库里跑一遍 `build-version.sh` 与 `just dist`: 有包版本的 `PROJECT_PACKAGE_VERSION` 时应当得到 `包版本-短hash`, Go 用 `0.0.0` 占位; 同时确认缺这个变量, tag 不匹配 `TAG_PREFIX` 和浅克隆三种情况都给出对应的原因, 而不是统一报"没有 tag".
-18. 确认 workflow 的 `解析构建版本` 步骤与 `just dist` 都传了 `PROJECT_PACKAGE_VERSION`, 并且 `build_version` 在任何触发方式下都有值, 首个 tag 之前的 branch 与 PR 运行不会失败.
+16. 语言模块给出的 `dist.py` 与 `archive.py` 要真跑一次: 至少覆盖一个 Unix 平台与一个 Windows 平台, 断言产物命名符合约定, 且二进制报出的版本号与注入值一致. 本机没有 Windows 时, 产物命名与归档格式可以拿 `archive.py` 单独验证 (设 `TARGET_PLATFORM=windows TARGET_ARCH=x86_64`), 真实的 PE 产物仍按 [pending-verification.md](references/pending-verification.md) 的替代路径处理.
+17. 在一个还没有任何 tag 的仓库里跑一遍 `build-version.py` 与 `just dist`: 有包版本的 `PROJECT_PACKAGE_VERSION` 时应当得到 `包版本-短hash`, Go 用 `0.0.0` 占位; 同时确认缺这个变量, tag 不匹配 `TAG_PREFIX` 和浅克隆三种情况都给出对应的原因, 而不是统一报"没有 tag".
+18. 确认 workflow 的 `解析构建版本` 步骤传了 `PROJECT_PACKAGE_VERSION`, `just dist` 侧由 `dist.py` 自己读包版本兜底, 并且 `build_version` 在任何触发方式下都有值, 首个 tag 之前的 branch 与 PR 运行不会失败.
+19. 确认所有要跑发布脚本的 job 都有 `astral-sh/setup-uv` 步骤 (job 之间不共享工具), 引用版本是存在且可解析的标签, 并且调用处按需要带了 `--no-project` (只有脚本要访问项目环境时才省略).
 
 本地检查不能证明所有 GitHub hosted runner 均可用. 待验证事项, 无法本地实证时的替代路径, 环境漂移与发布序列的历史遗留统一记录在 [pending-verification.md](references/pending-verification.md), 本文件不再重复罗列.
 
@@ -361,9 +359,14 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 - 遵循仓库现有的 action pinning 策略. 安全要求较高时使用完整 commit SHA.
 - 对 tag, 版本和路径变量加引号.
 - Bash 步骤使用 `set -euo pipefail`, 数组和 glob 同时处理空匹配.
+- 发布脚本用 Python 实现, 只用标准库, 不要引入第三方依赖: 这类脚本要能在任意机器和任意 runner 上直接跑, 也不需要项目环境. 平台差异写成脚本内部的分支, 不要拆成两套脚本.
+- 用 `uv run --no-project python <脚本>` 作为统一入口, 不要在 recipe 或 workflow 里按平台拼 `python3` / `python`: 解释器名不一致正是这套脚本原先要解决的问题之一. 例外是脚本需要项目环境里的工具时 (Python 项目的 `dist.py` 调 PyInstaller), 去掉 `--no-project`.
+- 脚本之间互相调用 (`dist.py` 调 `build-version.py` 与 `archive.py`) 必须用 `sys.executable`, 保证子脚本与父脚本跑在同一个解释器里, 也让 uv 选中的解释器能透传下去.
+- 脚本输出统一按 UTF-8 处理: 中文日志在 Windows 控制台默认代码页下会直接抛 `UnicodeEncodeError`, 各脚本开头都调用 `release_common.configure_output_encoding()`.
+- 平台无关的打包逻辑让 `archive.py` 负责: 产物命名, 扩展名, 可执行位都不要在项目自己的脚本里重复实现.
 - PowerShell 步骤使用 `-LiteralPath` 并在缺少文件时抛出错误.
 - PowerShell 字符串里拼接后缀要写成 `"${Name}.exe"`, 不要写 `"$Name.exe"`, 后者会被当成属性访问并静默得到空串.
-- PowerShell 脚本里的 `param()` 必须是第一条语句, 前面只能有注释.
+- 项目确实需要自己的 PowerShell 脚本时 (安装器, 签名等), `param()` 必须是第一条语句, 前面只能有注释.
 - 多行正文通过文件传递, 不要写入普通单行环境变量.
 - 不要在高权限 release job 中构建或执行不可信代码.
 - 依赖和构建缓存只配置在低权限构建或测试 job, 不要在高权限 release job 中恢复或写入缓存.
