@@ -109,6 +109,21 @@ gofmt -l .          # 只报告不修改
 
 ## 平台目标与 runner
 
+分两种做法, 先判定再选:
+
+- **纯 Go 且无 cgo**: 在一个 runner 上交叉编译出全部目标, 构建 job 不用矩阵. 这是默认选择, 六个目标通常几十秒就能出完.
+- **含 cgo**: 产物会绑定构建机的系统库, 交叉编译出来的东西在目标平台可能跑不起来, 按原生 runner 矩阵构建.
+
+判定命令, 输出为空才说明整条依赖链没有 cgo:
+
+```shell
+go list -deps -f '{{if .CgoFiles}}{{.ImportPath}}{{end}}' ./cmd/PROJECT
+```
+
+`CGO_ENABLED=0` 要显式固定. 注意它只是关掉 cgo 编译, 不能把本来必须 cgo 的项目变成纯 Go: 依赖链里一旦有 `net`, `os/user` 这类会根据 cgo 切换实现的包, 关掉之后行为会变化, 因此以 `go list` 的结果为准, 不要只看 `CGO_ENABLED` 有没有设置.
+
+原生矩阵用的 runner 标签与 `GOOS`/`GOARCH` 对应关系 (交叉编译时右侧两列照样可用, 只是不需要对应 runner):
+
 | 平台 | 架构 | runner 标签 | `GOOS`/`GOARCH` | 归档 |
 | --- | --- | --- | --- | --- |
 | Linux | x86_64 | `ubuntu-24.04` | `linux`/`amd64` | `.tar.gz` |
@@ -118,9 +133,42 @@ gofmt -l .          # 只报告不修改
 | Windows | x86_64 | `windows-2025` | `windows`/`amd64` | `.zip` |
 | Windows | aarch64 | `windows-11-arm` | `windows`/`arm64` | `.zip` |
 
-- 用原生 runner 而不是交叉编译: 冒烟检查要真正执行产物, 交叉编译的产物在 runner 上跑不起来. Go 交叉编译本身很容易, 但只能做文件格式检查.
-- 该标签组合已在真实仓库 (dida-cli) 全绿, 但 runner 资格, 镜像漂移与平台依赖只能在真实 run 上确认, 见 [pending-verification.md](../pending-verification.md).
+- 原生矩阵: 可以真正执行产物, `--version` 冒烟检查最有力; 该标签组合已在真实仓库 (dida-cli) 全绿, 但 runner 资格, 镜像漂移与平台依赖只能在真实 run 上确认, 见 [pending-verification.md](../pending-verification.md).
+- 交叉编译: 跑不了非宿主平台的产物, 校验退化为归档条目数, 文件头, 架构与注入的版本串, 见下文.
 - 归档名里的平台与架构 token 用 `macos`, `x86_64`, `aarch64` 这类通用写法, 不要把 `darwin` 与 `arm64` 直接写进产物名.
+
+交叉编译的全部目标 (单 runner, 无矩阵):
+
+```yaml
+- name: 生成全部平台发布产物
+  env:
+    PROJECT_BUILD_VERSION: v${{ needs.version.outputs.build_version }}
+  run: uv run --no-project python scripts/dist.py --all
+
+- name: 运行宿主平台 smoke test
+  shell: bash
+  run: |
+    set -euo pipefail
+    # 只有宿主平台这一份能真正执行, 其余靠 dist.py 的架构与版本串校验.
+    # 路径必须指向该目标自己的 staging 目录, 不能用共用的单一路径.
+    actual="$(./dist/stage/linux-x86_64/PROJECT --version)"
+    expected="v${{ needs.version.outputs.build_version }}"
+    if [[ "$actual" != "$expected" ]]; then
+      echo "版本输出为 $actual, 预期为 $expected" >&2
+      exit 1
+    fi
+```
+
+测试仍然按操作系统各跑一遍, 不能因为构建能交叉就只跑一份:
+
+```yaml
+strategy:
+  fail-fast: false
+  matrix:
+    os: [ubuntu-24.04, windows-2025, macos-15]
+```
+
+原生矩阵 (含 cgo 或需要真机冒烟时):
 
 ```yaml
 strategy:
@@ -153,6 +201,11 @@ strategy:
 
 `dist.py` 只改顶部几个常量: `PROJECT_NAME`, `MAIN_PACKAGE`, `BINARY_NAME`, `PACKAGE_VERSION`, `SMOKE_ARGS`. 它负责构建, 冒烟断言版本号, 然后交给 `archive.py` 拼名字并压缩. 归档用的版本段已在脚本内部剥掉 `v` 前缀, 所以产物名形如 `dida-0.1.2-linux-x86_64.tar.gz`, 而二进制内显示的是 `v0.1.2`; 两者样式不同是刻意的, 不要为了统一去改这段逻辑.
 
+`dist.py` 支持两种调用:
+
+- 不带参数: 只构建 `go env GOOS` / `GOARCH` 对应的当前平台, 并真的执行一次 `--version` 冒烟.
+- `--all`: 遍历 `DEFAULT_TARGETS` 的全部六个目标, 逐个设置 `GOOS` / `GOARCH` 交叉编译. 非宿主平台的产物跑不起来, 因此改为校验归档条目, 文件头, 架构与二进制里的版本串. 这条路径要先确认依赖链没有 cgo, 脚本本身不替你判断.
+
 `justfile` 保持一个不接受参数的 `dist`, 平台差异交给脚本:
 
 ```justfile
@@ -160,6 +213,8 @@ strategy:
 dist:
     uv run --no-project python scripts/dist.py
 ```
+
+需要一条命令出全部平台时, 由 CI 直接调 `scripts/dist.py --all`, 不要给 recipe 加参数.
 
 不经 `just dist` 直接跑 `scripts/dist.py` 时, 仓库还没有 tag 的情况下脚本会用 `PACKAGE_VERSION` 常量兜底, 不用在外面再传变量.
 
@@ -185,7 +240,10 @@ goreleaser 可以承担 deb/rpm, Homebrew tap, scoop 这类分发产物, 但必�
 
 - `-X` 路径写错或变量被改成常量时静默失效, 必须靠 `dist.py` 的冒烟断言兜住.
 - 默认的 buildvcs 会把 git 状态写进二进制, 发布构建加 `-trimpath`, 并显式决定是否需要 vcs 信息.
-- `CGO_ENABLED=0` 得到静态产物, 不继承 runner 的 glibc 下限; 一旦打开 cgo, 就要按 SKILL.md 的 glibc 说明评估兼容性, 不要声称普通动态链接产物是通用静态二进制.
+- `CGO_ENABLED=0` 得到静态产物, 不继承 runner 的 glibc 下限; 它也是单 runner 交叉编译成立的前提. 一旦打开 cgo, 就要按 SKILL.md 的 glibc 说明评估兼容性, 不要声称普通动态链接产物是通用静态二进制, 也回到原生矩阵去构建.
+- 交叉编译时 `GOOS` / `GOARCH` 必须同时进 `go build` 的环境与产物命名, 两处不一致会产出"名字是 linux 内容是 darwin"的归档; 命名 token 要跟着实际构建目标走, 不要用 `go env` 的默认值覆盖它.
+- 交叉编译的产物在本机跑不起来, 别把宿主平台的 `--version` 结果当成全部产物的验证; 其余平台要么查文件头与架构, 要么干脆按原生矩阵构建.
+- 交叉编译多个目标时, 每个目标必须有自己的 staging 路径 (`dist/stage/<platform>-<arch>/`). 六个目标共用一个输出路径时, 后一个会覆盖前一个, 最后留下的那份往往是别的平台, 于是后续的 `--version` smoke test 直接报 `cannot execute binary file: Exec format error` (实测踩到: 最后一个目标是 macOS arm64, 在 Linux runner 上执行).
 - Windows 产物要带 `.exe` 后缀并打 `zip`, 命名仍用 `windows` 与 `x86_64` 这样的 token.
 - `macos-15` 是 arm64, `macos-15-intel` 才是 x86_64; `macos-latest` 现在是 macOS 26 arm64, `ubuntu-latest` 是 x64, 不要靠 `*-latest` 猜架构.
 - 构建期不要读取 `.git`: Go 的 `-buildvcs` 与自定义版本注入都会让构建结果随 commit 变化, 增量缓存跟着失效.

@@ -189,6 +189,91 @@ def check_binary_format(path, expected_platform):
     print(f"文件格式检查通过: {path} ({expected_platform})")
 
 
+def check_binary_arch(path, expected_platform, expected_arch):
+    """核对可执行文件头里的架构.
+
+    同一个平台的 amd64 与 arm64 产物只有架构字段不同, 光看文件头魔数区分不了,
+    交叉编译时需要它把"名字是 arm64 内容是 x86_64"这类错配挡下来.
+    expected_arch 用产物命名里的 token (x86_64 / aarch64).
+    """
+    wanted = {
+        "linux": {"x86_64": 62, "aarch64": 183},        # ELF e_machine
+        "macos": {"x86_64": 0x01000007, "aarch64": 0x0100000C},  # Mach-O cputype
+        "windows": {"x86_64": 0x8664, "aarch64": 0xAA64},        # PE Machine
+    }
+    table = wanted.get(expected_platform)
+    if table is None or expected_arch not in table:
+        die(f"没有为 {expected_platform}-{expected_arch} 定义架构校验, 请在 release_common.py 里补充")
+    if not os.path.isfile(path):
+        die(f"产物不存在: {path}")
+
+    with open(path, "rb") as handle:
+        payload = handle.read(4096)
+    actual = _read_arch(path, payload, expected_platform)
+    if actual != table[expected_arch]:
+        die(
+            f"{path} 的架构与目标不符: 读到的值是 {actual:#x}, "
+            f"期望 {table[expected_arch]:#x} ({expected_platform}-{expected_arch})"
+        )
+    print(f"架构检查通过: {path} ({expected_platform}-{expected_arch})")
+
+
+def _read_arch(path, payload, platform):
+    """按平台格式读出架构字段, 读不到时返回 None."""
+    if platform == "linux":
+        if len(payload) < 20 or payload[:4] != b"\x7fELF":
+            die(f"{path} 不是 ELF 文件: {payload[:4]!r}")
+        # e_machine 在 18 偏移, 字节序由 EI_DATA (偏移 5) 决定.
+        order = "little" if payload[5] == 1 else "big"
+        return int.from_bytes(payload[18:20], order)
+
+    if platform == "macos":
+        magic = payload[:4]
+        if magic in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe"):
+            order = "little"
+        elif magic in (b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce"):
+            order = "big"
+        else:
+            die(f"{path} 不是 Mach-O 文件: {magic!r}")
+        return int.from_bytes(payload[4:8], order)
+
+    if platform == "windows":
+        if payload[:2] != b"MZ":
+            die(f"{path} 不是 PE 文件: {payload[:2]!r}")
+        pe_offset = int.from_bytes(payload[0x3C:0x40], "little")
+        if pe_offset + 6 > len(payload):
+            # PE 头通常落在前 1KB 内, 4096 字节还不够就说明文件本身有问题.
+            with open(path, "rb") as handle:
+                handle.seek(pe_offset)
+                extra = handle.read(6)
+            if len(extra) < 6:
+                die(f"{path} 的 PE 头偏移越界: {pe_offset}")
+            payload = extra
+            pe_offset = 0
+        if payload[pe_offset:pe_offset + 4] != b"PE\x00\x00":
+            die(f"{path} 的 PE 签名不正确")
+        return int.from_bytes(payload[pe_offset + 4:pe_offset + 6], "little")
+
+    die(f"没有为 {platform} 定义架构读取方式")
+    return None
+
+
+def check_version_string(path, expected_version):
+    """在产物字节里找出注入的版本号.
+
+    交叉编译的产物执行不了, 但它只要真的注入了版本, 字符串就在可执行文件里,
+    这样能挡住 -X 路径写错导致的静默失效.
+    """
+    if not os.path.isfile(path):
+        die(f"产物不存在: {path}")
+    needle = expected_version.encode("utf-8")
+    with open(path, "rb") as handle:
+        payload = handle.read()
+    if needle not in payload:
+        die(f"{path} 里找不到版本号 {expected_version}, 检查 -X 注入路径是否写错")
+    print(f"版本串检查通过: {path} ({expected_version})")
+
+
 def archive(
     staging,
     artifacts,

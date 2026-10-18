@@ -180,7 +180,16 @@ uv 由项目自行准备 (本机安装, 或 CI 里用 `astral-sh/setup-uv`); 托
 
 桌面应用默认按安装版分发, 便携版只在项目明确提供该形态时才出产物. 安装布局, 安装器要求与自动更新落地方式见 desktop-app-skill.
 
-在实现时查阅 GitHub 官方 runner 文档, 确认当前可用的 runner 标签和仓库资格. 优先使用对应系统和架构的原生 runner, 具体标签组合见语言模块. 无法原生构建时使用项目成熟的交叉编译工具链, 并明确 linker, sysroot 和系统库要求.
+在实现时查阅 GitHub 官方 runner 文档, 确认当前可用的 runner 标签和仓库资格. 默认使用对应系统和架构的原生 runner, 具体标签组合见语言模块.
+
+交叉编译只对"工具链本身不依赖目标平台系统库"的项目开放. 典型是纯 Go 且没有 cgo 依赖的 CLI: 这类项目全部平台的产物可以在一个 runner 上交叉编译出来, 不必按平台拆 job, 构建耗时通常只有几十秒.
+
+- 先确认确实没有 cgo 依赖 (Go 用 `go list -deps` 或 `go list -f '{{.CgoFiles}}'` 检查), 并固定 `CGO_ENABLED=0`. 一旦有 cgo, 产物就绑定构建机的系统库, 交叉编译出来的东西在目标平台可能根本跑不起来, 这类项目仍按原生 runner 矩阵构建.
+- 交叉编译只能产出文件, 运行不了, 所以归档前的校验退化为四件事: 归档结构与条目数, 可执行文件头, 架构 token 与目标一致, 以及二进制里带着本次构建的版本号. 只有宿主平台那一份可以跑 `--version` 冒烟, 不要拿它冒充全部产物的验证.
+- 测试无法交叉运行. `go test` 必须在本机跑, 因此测试仍按操作系统用原生 runner 覆盖 (Linux, Windows, macOS 各一份), 不要因为构建能交叉就把测试也压成一份, 那会丢掉平台分支的真实覆盖.
+- 需要目标平台工具链的项目 (cgo, 签名, 安装器, 应用包目录) 不适用, 仍用原生矩阵.
+
+无法原生构建时使用项目成熟的交叉编译工具链, 并明确 linker, sysroot 和系统库要求.
 
 > 注: 不要使用已经退役的 runner, 比如 macos-13-intel 等.
 > 注: 不要靠 `*-latest` 推断 CPU 架构: `ubuntu-latest` 是 x64, `macos-latest` 现在是 macOS 26 arm64, `macos-14` 已进入 deprecated. 需要特定架构时显式写标签, 例如 `ubuntu-24.04-arm`, `macos-15`, `macos-15-intel`, `windows-11-arm`.
@@ -194,7 +203,7 @@ uv 由项目自行准备 (本机安装, 或 CI 里用 `astral-sh/setup-uv`); 托
 - macOS 桌面应用 dmg 必须包含指向 `/Applications` 的符号链接和应用的 `.app` 包, 校验方式见 [workflow-patterns.md](references/workflow-patterns.md#平台产物校验).
 - Windows 桌面应用安装器检查 PE 文件头, 并在 windows runner 上用自动更新同款的静默参数 (`/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOICONS`) 装到临时目录, 断言主程序与随附 dll 都已就位, 再用该目录里的 `unins000.exe` 静默卸载. 这一步同时验证了自动更新要走的静默路径, 校验片段见 [workflow-patterns.md](references/workflow-patterns.md#平台产物校验).
 - Linux 桌面应用安装包断言含 `install.sh` 与 `payload/` 下的主程序, 再用 `install.sh --silent --prefix <临时目录>` 装一次, 断言可执行位, desktop 项与图标都落在该前缀内; `install.sh` 因此必须支持 `--prefix`.
-- 无法直接运行的交叉编译产物使用模拟器, 加载检查或文件格式检查.
+- 无法直接运行的交叉编译产物使用模拟器, 加载检查或文件格式检查; 同一平台上还要核对架构 (ELF `e_machine`, Mach-O `cputype`, PE `Machine`), 否则 amd64 与 arm64 的产物互换后光看文件头是看不出来的.
 
 不要为了形式统一而强行执行会启动 GUI, 后台服务或交互流程的二进制.
 
@@ -211,6 +220,8 @@ VARIANT 是可选段, 只用于同一平台同一架构存在多种分发形态�
 平台无关的托管运行时产物, 例如 .NET dll 程序集和 Java jar/war, 不强行添加 PLATFORM-ARCH 后缀, 直接命名为 PROJECT-VERSION.EXT, Actions artifact 名同理, 例如 `project-1.2.3.jar` 与 `project-1.2.3`.
 
 构建 job 为每个矩阵项上传一个独立 artifact, 缺少文件时直接失败. 该步骤不限于 tag 或手动触发. 发布专用 artifact 可以设置较短 retention. Release job 下载并合并全部 artifact, 只对预期扩展名生成统一的 `SHA256SUMS`. SHA256SUMS 和 GitHub Release 只在 `is_release` 为 `true` 时生成.
+
+单 runner 交叉编译时没有矩阵, 那一个 job 一次性产出全部平台归档, 用一个 artifact 上传即可 (artifact 名带 `build_version` 而不带平台与架构). 此时的数量校验按展开后的归档数计, 例如六个平台仍然期望六个归档.
 
 在生成校验和前显式统计归档数量. 在上传 release 前再次统计归档和 `SHA256SUMS` 的总数量. 数量必须与矩阵一致, 防止 glob 静默漏传或混入旧文件. 桌面应用按项目实际提供的形态计数: 只出安装版时每个平台架构一项, 同时提供便携版时再加一项, 期望值按矩阵展开后的总数填写.
 
