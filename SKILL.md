@@ -78,7 +78,7 @@ manual tag -> validate version -> test/build -> notes -> create/update release
 > 版本号显示必须自动生成, 而不是手动编辑写死.
 > 库分发不要把 git describe 或短 hash 写入包版本. 包版本保持 metadata 中的稳定版本, 由 tag 与其严格对齐.
 
-二进制/应用复制 [build-version.py](references/build-version.py), [archive.py](references/archive.py) 与 [release_common.py](references/release_common.py) 到项目的 `scripts/`, 再按语言模块给出的清单复制该语言的 `dist.py`. 这些脚本是跨平台的 Python, 只用标准库, 平台差异在脚本内部判断, 不要按平台拆成 sh 与 ps1 两份实现, 也不需要设置可执行位: 用 `uv run --no-project python scripts/<脚本>.py` 调用, 解释器由 uv 解析, 各平台共用同一条命令. `--no-project` 让 uv 不去读项目的 `pyproject.toml` 与建 `.venv`, 避免为只用标准库的脚本白做一次依赖解析; 但若项目需要脚本用到项目环境里的第三方工具 (例如 Python 项目的 `dist.py` 要用 PyInstaller), 该入口改用 `uv run python`, 让它复用项目环境. 各文件按开头说明改占位符.
+二进制/应用复制 [build-version.py](references/build-version.py), [archive.py](references/archive.py), [release_common.py](references/release_common.py) 与 [output_encoding.py](references/output_encoding.py) 到项目的 `scripts/`, 再按语言模块给出的清单复制该语言的 `dist.py`. 这些脚本是跨平台的 Python, 只用标准库, 平台差异在脚本内部判断, 不要按平台拆成 sh 与 ps1 两份实现, 也不需要设置可执行位: 用 `uv run --no-project python scripts/<脚本>.py` 调用, 解释器由 uv 解析, 各平台共用同一条命令. `--no-project` 让 uv 不去读项目的 `pyproject.toml` 与建 `.venv`, 避免为只用标准库的脚本白做一次依赖解析; 但若项目需要脚本用到项目环境里的第三方工具 (例如 Python 项目的 `dist.py` 要用 PyInstaller), 该入口改用 `uv run python`, 让它复用项目环境. 各文件按开头说明改占位符. 项目自有的 Python 脚本同样 `from output_encoding import configure_output_encoding` 并在 `main` 开头调用一次.
 
 版本注入统一使用 `PROJECT_BUILD_VERSION` 环境变量, 归档命名统一由 `archive.py` 负责:
 
@@ -387,7 +387,7 @@ Release workflow 必须在 checkout 后使用解析得到的 `tag_name` 精确 r
 - 发布脚本用 Python 实现, 只用标准库, 不要引入第三方依赖: 这类脚本要能在任意机器和任意 runner 上直接跑, 也不需要项目环境. 平台差异写成脚本内部的分支, 不要拆成两套脚本.
 - 用 `uv run --no-project python <脚本>` 作为统一入口, 不要在 recipe 或 workflow 里按平台拼 `python3` / `python`: 解释器名不一致正是这套脚本原先要解决的问题之一. 例外是脚本需要项目环境里的工具时 (Python 项目的 `dist.py` 调 PyInstaller), 去掉 `--no-project`.
 - 脚本之间互相调用 (`dist.py` 调 `build-version.py` 与 `archive.py`) 必须用 `sys.executable`, 保证子脚本与父脚本跑在同一个解释器里, 也让 uv 选中的解释器能透传下去.
-- 脚本输出统一按 UTF-8 处理: 中文日志在 Windows 控制台默认代码页下会直接抛 `UnicodeEncodeError`, 各脚本开头都调用 `release_common.configure_output_encoding()`.
+- 脚本输出统一按 UTF-8 处理: 所有 Python 脚本 (含项目自有) 在 `main` 开头调用 `configure_output_encoding()`, 实现见 `scripts/output_encoding.py`.
 - 平台无关的打包逻辑让 `archive.py` 负责: 产物命名, 扩展名, 可执行位都不要在项目自己的脚本里重复实现.
 - PowerShell 步骤使用 `-LiteralPath` 并在缺少文件时抛出错误.
 - PowerShell 字符串里拼接后缀要写成 `"${Name}.exe"`, 不要写 `"$Name.exe"`, 后者会被当成属性访问并静默得到空串.

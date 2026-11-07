@@ -106,7 +106,7 @@ uv build
 
 ## 归档与打包
 
-复制 [assets/python/dist.py](assets/python/dist.py) 到 `scripts/dist.py`, 再复制 [assets/python/entry.py](assets/python/entry.py) 到 `scripts/entry.py` (把里面的包名占位符换掉), 同时复制 [../archive.py](../archive.py), [../build-version.py](../build-version.py) 与 [../release_common.py](../release_common.py). 平台判断在脚本内部完成, 不需要再准备一份 Windows 专用脚本.
+复制 [assets/python/dist.py](assets/python/dist.py) 到 `scripts/dist.py`, 再复制 [assets/python/entry.py](assets/python/entry.py) 到 `scripts/entry.py` (把里面的包名占位符换掉), 同时复制 [../archive.py](../archive.py), [../build-version.py](../build-version.py), [../release_common.py](../release_common.py) 与 [../output_encoding.py](../output_encoding.py). 平台判断在脚本内部完成, 不需要再准备一份 Windows 专用脚本.
 
 - 只改顶部常量: `PROJECT_NAME`, `PACKAGE_NAME`, `PACKAGE_DIR`, `ENTRY`, `PACKAGE_PATH`, `BINARY_NAME`, `SMOKE_ARGS`.
 - `ENTRY` 必须指向绝对导入的启动脚本 (`scripts/entry.py`), 不能指向包内的 `__main__.py`: 后者由 `python -m` 执行时相对导入成立, 被 PyInstaller 当作顶层 `__main__` 执行时必然报 `ImportError: attempted relative import with no known parent package`. 已经实测踩过这一次.

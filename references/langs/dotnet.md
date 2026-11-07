@@ -112,7 +112,7 @@ dotnet format --verify-no-changes        # 只报告不修改
 
 ## 归档与打包
 
-复制 [assets/dotnet/dist.py](assets/dotnet/dist.py) 到 `scripts/dist.py`, 同时复制 [../archive.py](../archive.py), [../build-version.py](../build-version.py) 与 [../release_common.py](../release_common.py). 平台判断与 RID 推导都在脚本内部完成, 不需要再准备一份 Windows 专用脚本.
+复制 [assets/dotnet/dist.py](assets/dotnet/dist.py) 到 `scripts/dist.py`, 同时复制 [../archive.py](../archive.py), [../build-version.py](../build-version.py), [../release_common.py](../release_common.py) 与 [../output_encoding.py](../output_encoding.py). 平台判断与 RID 推导都在脚本内部完成, 不需要再准备一份 Windows 专用脚本.
 
 - 只改顶部常量: `PROJECT_NAME`, `PROJECT_FILE`, `BINARY_NAME`, `SMOKE_ARGS`.
 - `BUILD_MODE=self-contained` 出带平台架构后缀的 RID 二进制; `BUILD_MODE=framework-dependent` 出平台无关的 dll 程序集, 脚本会按 `PLATFORM_INDEPENDENT=1` 交给归档 helper, 得到 `PROJECT-VERSION.zip`.

@@ -107,7 +107,7 @@ cargo fmt --check        # 只报告不修改
 
 ## 归档与打包
 
-复制 [assets/rust/dist.py](assets/rust/dist.py) 到 `scripts/dist.py`, 同时复制 [../archive.py](../archive.py), [../build-version.py](../build-version.py) 与 [../release_common.py](../release_common.py). 平台判断在脚本内部完成, 不需要再准备一份 Windows 专用脚本.
+复制 [assets/rust/dist.py](assets/rust/dist.py) 到 `scripts/dist.py`, 同时复制 [../archive.py](../archive.py), [../build-version.py](../build-version.py), [../release_common.py](../release_common.py) 与 [../output_encoding.py](../output_encoding.py). 平台判断在脚本内部完成, 不需要再准备一份 Windows 专用脚本.
 
 - `dist.py` 只改顶部常量: `PROJECT_NAME`, `PACKAGE_NAME`, `BINARY_NAME`, `SMOKE_ARGS`.
 - `dist.py` 会把解析出的版本作为 `PROJECT_BUILD_VERSION` 传给 `cargo`, 让 `build.rs` 注入它; 少了这一步, 直接跑脚本时产物里还是 `dev-build`.

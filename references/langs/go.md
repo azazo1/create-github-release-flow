@@ -197,7 +197,7 @@ strategy:
 
 ## 归档与打包
 
-复制 [assets/go/dist.py](assets/go/dist.py) 到项目的 `scripts/dist.py`, 同时复制 [../archive.py](../archive.py), [../build-version.py](../build-version.py) 与 [../release_common.py](../release_common.py). 平台判断在脚本内部完成, 不需要再准备一份 Windows 专用脚本.
+复制 [assets/go/dist.py](assets/go/dist.py) 到项目的 `scripts/dist.py`, 同时复制 [../archive.py](../archive.py), [../build-version.py](../build-version.py), [../release_common.py](../release_common.py) 与 [../output_encoding.py](../output_encoding.py). 平台判断在脚本内部完成, 不需要再准备一份 Windows 专用脚本.
 
 `dist.py` 只改顶部几个常量: `PROJECT_NAME`, `MAIN_PACKAGE`, `BINARY_NAME`, `PACKAGE_VERSION`, `SMOKE_ARGS`. 它负责构建, 冒烟断言版本号, 然后交给 `archive.py` 拼名字并压缩. 归档用的版本段已在脚本内部剥掉 `v` 前缀, 所以产物名形如 `dida-0.1.2-linux-x86_64.tar.gz`, 而二进制内显示的是 `v0.1.2`; 两者样式不同是刻意的, 不要为了统一去改这段逻辑.
 

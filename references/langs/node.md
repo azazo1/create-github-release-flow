@@ -110,7 +110,7 @@ pnpm run test
 
 ## 归档与打包
 
-复制 [assets/node/dist.py](assets/node/dist.py) 到 `scripts/dist.py`, 同时复制 [../archive.py](../archive.py), [../build-version.py](../build-version.py) 与 [../release_common.py](../release_common.py). 平台判断在脚本内部完成, 不需要再准备一份 Windows 专用脚本.
+复制 [assets/node/dist.py](assets/node/dist.py) 到 `scripts/dist.py`, 同时复制 [../archive.py](../archive.py), [../build-version.py](../build-version.py), [../release_common.py](../release_common.py) 与 [../output_encoding.py](../output_encoding.py). 平台判断在脚本内部完成, 不需要再准备一份 Windows 专用脚本.
 
 - 只改顶部常量: `PROJECT_NAME`, `ENTRY`, `BINARY_NAME`, `SMOKE_ARGS`; 需要时用 `BUNDLER` 在 bun 与 esbuild 之间切换.
 - Windows 产物必须带 `.exe` 后缀并打成 `zip`, 命名里仍用 `windows-x86_64` 这类 token; 这两件事脚本按当前平台自动处理.
